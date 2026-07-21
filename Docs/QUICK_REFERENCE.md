@@ -1,74 +1,74 @@
-# Quick Reference Card - ScreenToImageConverter
+# Quick Reference
 
-## 🎯 One-Page Summary
+One-page cheat sheet for common tasks.
 
-### Current Status
-```
-✅ Phase 1: Screenshot Capture      COMPLETE (100%)
-⏳ Phase 2: Service Bus Integration READY (0%)
-Tests: 15/15 PASSING | Build: SUCCESS | Docs: 2,500+ LINES
-```
-
----
-
-## 📖 Documentation Map (Start Here)
+## Project Structure
 
 ```
-Role/Need                          →  Document
-─────────────────────────────────────────────────────────────
-I want to USE the API              →  PLAYWRIGHT_SCREENSHOT_GUIDE.md
-I want to UNDERSTAND architecture  →  SOLUTION_OVERVIEW.md
-I want STATUS/SUMMARY              →  PHASE1_COMPLETE.md
-I want VISUAL OVERVIEW             →  IMPLEMENTATION_DASHBOARD.md
-I'm NEW to the project             →  DOCUMENTATION_INDEX.md
-I need to DEPLOY it                →  PHASE1_COMPLETE.md (Deployment)
-I want to EXTEND the code          →  STEP6_IMPLEMENTATION_GUIDE.md
-What's NEXT?                       →  PHASE2_SERVICE_BUS_INTEGRATION.md
+src/ScreenToImageConverter.Shared/       Contracts & Interfaces
+  Configuration/                         PlaywrightOptions, ServiceBusOptions, BlobStorageOptions
+  Interfaces/                            IScreenshotProvider, IBlobStorageProvider, IMessageConsumer, IMessagePublisher
+  Messages/                              HtmlScreenshotRequest, ScreenshotCompletedEvent
+  Exceptions/                            ScreenshotProcessingException
+  Results/                               OperationResult<T>
+
+src/ScreenToImageConverter.Worker/       .NET 9 Worker Service
+  Features/
+	ScreenshotCapture/                   Playwright integration
+	BlobStorageUpload/                   Azure Blob Storage upload
+	ServiceBusMessaging/                 Service Bus consumer/publisher
+
+tests/ScreenToImageConverter.Tests/      Unit & Integration Tests
 ```
 
----
+## Build & Run
 
-## 🚀 Quick Start (5 minutes)
+```bash
+# Build
+dotnet build
 
-### 1. Inject the Handler
+# Run
+dotnet run --project src/ScreenToImageConverter.Worker
+
+# Test
+dotnet test
+
+# Release build
+dotnet build -c Release
+```
+
+## Dependency Injection
+
 ```csharp
-public class MyService
-{
-	private readonly CaptureScreenshotHandler _handler;
+// Feature registration
+services.AddScreenshotCaptureFeature(configuration);
+services.AddBlobStorageUploadFeature(configuration);
+services.AddServiceBusMessagingFeature(configuration);
 
-	public MyService(CaptureScreenshotHandler handler)
-	{
-		_handler = handler;
-	}
-}
+// Inject into service
+public MyService(CaptureScreenshotHandler handler) { }
 ```
 
-### 2. Create a Command
+## Screenshot Capture
+
 ```csharp
 var command = new CaptureScreenshotCommand
 {
 	Url = "https://example.com",
+	ViewportWidth = 1920,
+	ViewportHeight = 1080,
+	TimeoutMs = 30000,
 	CorrelationId = Guid.NewGuid().ToString()
 };
+
+var result = await handler.HandleAsync(command, cancellationToken);
+// result.ImageData – PNG bytes
+// result.ImageSizeBytes – File size
+// result.CapturedAt – Timestamp
 ```
 
-### 3. Capture Screenshot
-```csharp
-var result = await _handler.HandleAsync(command, cancellationToken);
-```
+## Configuration
 
-### 4. Use the Result
-```csharp
-byte[] imageData = result.ImageData;      // PNG bytes
-int sizeBytes = result.ImageSizeBytes;    // Size
-DateTime captured = result.CapturedAt;    // When
-```
-
----
-
-## ⚙️ Configuration Essentials
-
-### appsettings.json
 ```json
 {
   "Playwright": {
@@ -76,238 +76,267 @@ DateTime captured = result.CapturedAt;    // When
 	"DefaultViewportWidth": 1920,
 	"DefaultViewportHeight": 1080,
 	"DefaultTimeoutMs": 30000,
-	"MaxRetryAttempts": 2
+	"MaxRetryAttempts": 2,
+	"DisableSandbox": false
+  },
+  "AzureServiceBus": {
+	"ConnectionString": "Endpoint=sb://...;",
+	"QueueName": "screenshot-requests"
+  },
+  "AzureBlobStorage": {
+	"ConnectionString": "DefaultEndpointsProtocol=https;...",
+	"ContainerName": "screenshots"
   }
 }
 ```
 
-### Custom Parameters
-```csharp
-var command = new CaptureScreenshotCommand
-{
-	Url = "https://example.com",
-	ViewportWidth = 1280,      // Override default
-	ViewportHeight = 720,
-	TimeoutMs = 60000,         // Override default
-};
+Override with environment variables:
+```bash
+export Playwright__DefaultTimeoutMs=45000
+export AzureServiceBus__QueueName=my-queue
 ```
 
----
+## Service Bus Message
 
-## 🧪 Testing Example
-
-### Unit Test
-```csharp
-var mockProvider = new Mock<IScreenshotProvider>();
-mockProvider
-	.Setup(p => p.CaptureScreenshotAsync(
-		It.IsAny<string>(), It.IsAny<int>(), 
-		It.IsAny<int>(), It.IsAny<int>(), 
-		It.IsAny<CancellationToken>()))
-	.ReturnsAsync(new byte[] { /* PNG data */ });
-
-var handler = new CaptureScreenshotHandler(
-	mockProvider.Object, optionsMock, loggerMock);
-
-var result = await handler.HandleAsync(command, CancellationToken.None);
-```
-
-### Integration Test
-```csharp
-var fixture = new ScreenshotCaptureTestFixture();
-await fixture.InitializeAsync();
-
-var handler = fixture.GetService<CaptureScreenshotHandler>();
-var result = await handler.HandleAsync(command, CancellationToken.None);
-
-Assert.NotNull(result.ImageData);
-```
-
----
-
-## 🔧 Common Tasks
-
-### Capture a Screenshot
-See: PLAYWRIGHT_SCREENSHOT_GUIDE.md → Basic Usage
-
-### Use Custom Viewport (Mobile)
-```csharp
-new CaptureScreenshotCommand {
-	Url = "...",
-	ViewportWidth = 375,   // iPhone width
-	ViewportHeight = 812   // iPhone height
-}
-```
-
-### Extend Timeout
-```csharp
-new CaptureScreenshotCommand {
-	Url = "...",
-	TimeoutMs = 60000  // 60 seconds
-}
-```
-
-### Test Without Real Browser
-Use: `MockScreenshotProvider` in test fixtures
-
-### Configure for Docker
 ```json
 {
-  "Playwright": {
-	"DisableSandbox": true
+  "url": "https://example.com",
+  "viewportWidth": 1920,
+  "viewportHeight": 1080,
+  "timeoutMs": 30000,
+  "correlationId": "unique-id"
+}
+```
+
+## Logging
+
+```csharp
+_logger.LogInformation("Processing {CorrelationId}", correlationId);
+_logger.LogError(ex, "Failed to process {CorrelationId}", correlationId);
+```
+
+Set log level:
+```json
+{
+  "Logging": {
+	"LogLevel": {
+	  "Default": "Information",
+	  "Microsoft": "Warning"
+	}
   }
 }
 ```
 
----
+## Testing
 
-## 📊 Architecture (One-Pager)
+```csharp
+// Mock provider
+var mockProvider = new Mock<IScreenshotProvider>();
+mockProvider
+	.Setup(x => x.CaptureAsync(It.IsAny<string>(), ...))
+	.ReturnsAsync(new ScreenshotResult { ... });
 
+// Create handler with mock
+var handler = new CaptureScreenshotHandler(
+	mockProvider.Object,
+	loggerMock.Object);
+
+// Test
+var result = await handler.HandleAsync(command);
+Assert.NotNull(result);
 ```
-HtmlScreenshotRequest
-		 ↓
-CaptureScreenshotHandler ← PlaywrightOptions
-		 ↓
-IScreenshotProvider ← PlaywrightScreenshotProvider
-		 ↓
-ScreenshotResult
-		 ↓
-(Next: UploadScreenshotHandler → Blob Storage)
-		 ↓
-(Next: ServiceBusEventPublisher → Service Bus)
+
+## Create a New Feature
+
+1. Create folder: `Features/YourFeatureName/`
+2. Add subdirectories: `Commands/`, `Handlers/`, `Models/`
+3. Implement command and handler
+4. Create `YourFeatureExtensions.cs` for DI registration:
+   ```csharp
+   public static class YourFeatureExtensions
+   {
+	   public static IServiceCollection AddYourFeature(
+		   this IServiceCollection services, IConfiguration config)
+	   {
+		   services.Configure<YourOptions>(config.GetSection("Your"));
+		   services.AddScoped<YourHandler>();
+		   return services;
+	   }
+   }
+   ```
+5. Register in `Program.cs`: `services.AddYourFeature(configuration);`
+6. Add tests in `tests/ScreenToImageConverter.Tests/Features/YourFeatureName/`
+
+## Health Checks
+
+```csharp
+// All health checks are registered in Program.cs
+// Endpoint: http://localhost:5000/health
 ```
 
----
-
-## ✅ Verification Checklist
-
-- ✅ Code compiles: `dotnet build`
-- ✅ Tests pass: `dotnet test`
-- ✅ Configuration valid: Check appsettings.json
-- ✅ DI registered: Check Program.cs
-- ✅ Health check: GET /health/ready
-
----
-
-## 🐛 Troubleshooting
+## Common Issues
 
 | Issue | Solution |
 |-------|----------|
-| Screenshot times out | Increase TimeoutMs parameter |
-| Mobile layout needed | Set ViewportWidth/Height to mobile size |
-| Docker failures | Set DisableSandbox: true |
-| Memory issues | Ensure browser is singleton (it is!) |
-| Blank screenshots | Increase timeout or check URL |
+| Browser not launching | Ensure Playwright is installed: `playwright install` |
+| Connection timeout | Check connection string, firewall, Service Bus connectivity |
+| Blob upload fails | Verify container exists, check storage account credentials |
+| Tests timing out | Increase `DefaultTimeoutMs` in configuration |
+| "Sandbox" errors in Docker | Set `DisableSandbox: true` in production config |
 
-See: PLAYWRIGHT_SCREENSHOT_GUIDE.md → Troubleshooting
+## Useful Commands
 
----
+```bash
+# Restore NuGet packages
+dotnet restore
 
-## 📁 Key Files
+# Clean build
+dotnet clean
+dotnet build
 
-```
-Core Logic
-  src/ScreenToImageConverter.Infrastructure/
-	└─ Providers/PlaywrightScreenshotProvider.cs (313 lines)
+# Run tests with output
+dotnet test --logger:console --verbosity:detailed
 
-Handler
-  src/ScreenToImageConverter.Worker/
-	└─ Features/ScreenshotCapture/Handlers/CaptureScreenshotHandler.cs
+# Run specific test
+dotnet test --filter "MethodName"
 
-Configuration
-  src/ScreenToImageConverter.Shared/
-	└─ Configuration/PlaywrightOptions.cs
+# Format code
+dotnet format
 
-Tests
-  tests/ScreenToImageConverter.Tests/
-	└─ Features/ScreenshotCapture/CaptureScreenshotHandlerTests.cs
+# List NuGet packages
+dotnet list package
 
-Fixtures
-  tests/ScreenToImageConverter.Tests/Fixtures/
-	├─ MockScreenshotProvider.cs
-	└─ ScreenshotCaptureTestFixture.cs
-```
+# Update packages
+dotnet add package <PackageName> --version <Version>
 
----
+# Publish for deployment
+dotnet publish -c Release -o ./publish
 
-## 🚀 Deploy Checklist
-
-- [ ] Code review completed
-- [ ] All tests passing (15/15)
-- [ ] Build succeeds (0 warnings)
-- [ ] Configuration prepared
-- [ ] Service Bus configured
-- [ ] Blob Storage configured
-- [ ] Health check verified
-- [ ] Logging configured
-- [ ] Monitoring set up
-- [ ] Documentation reviewed
-
----
-
-## 📞 Need Help?
-
-| Question | Where to Look |
-|----------|---------------|
-| How to use? | PLAYWRIGHT_SCREENSHOT_GUIDE.md |
-| Architecture? | SOLUTION_OVERVIEW.md |
-| Examples? | CaptureScreenshotHandlerTests.cs |
-| Troubleshoot? | PLAYWRIGHT_SCREENSHOT_GUIDE.md → Troubleshooting |
-| Next steps? | PHASE2_SERVICE_BUS_INTEGRATION.md |
-| All docs? | DOCUMENTATION_INDEX.md |
-
----
-
-## 🎯 Quick Stats
-
-```
-Lines of Code:        313 (core provider)
-Test Coverage:        100% (handlers)
-Tests Passing:        15/15 (100%)
-Documentation:        2,500+ lines
-Build Status:         ✅ SUCCESS
-Production Ready:     ✅ YES
+# Install Playwright browsers
+playwright install
 ```
 
----
+## Azure CLI Commands
 
-## ⏱️ Performance Profile
+```bash
+# Create Service Bus queue
+az servicebus queue create \
+  --namespace-name my-ns \
+  --name screenshot-requests \
+  --resource-group my-rg
 
+# Create Storage container
+az storage container create \
+  --account-name myaccount \
+  --name screenshots
+
+# Get connection string
+az servicebus namespace authorization-rule keys list \
+  --namespace-name my-ns \
+  --name RootManageSharedAccessKey
+
+az storage account show-connection-string \
+  --name myaccount \
+  --resource-group my-rg
+
+# Assign Managed Identity role
+az role assignment create \
+  --role "Azure Service Bus Data Owner" \
+  --assignee-object-id <principal-id> \
+  --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ServiceBus/namespaces/<ns>
 ```
-First Screenshot:     ~3-5 seconds (browser init)
-Subsequent:           ~1-3 seconds
-Memory per capture:   30-50 MB
-Success Rate:         ~99% (with retries)
+
+## Documentation Map
+
+| Document | When to Read |
+|----------|--------------|
+| [README.md](../README.md) | Project overview, features, quick start |
+| [GETTING_STARTED.md](./GETTING_STARTED.md) | Setup and first run |
+| [DEVELOPMENT.md](./DEVELOPMENT.md) | Architecture, extending features |
+| [CONFIGURATION.md](./CONFIGURATION.md) | All configuration options |
+| [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) | Cheat sheet (this file) |
+
+## Key Patterns
+
+### Handler Pattern
+```csharp
+public class MyHandler
+{
+	public async Task<MyResult> HandleAsync(MyCommand cmd, CancellationToken ct)
+	{
+		// Process cmd, return result
+	}
+}
 ```
 
----
+### Feature Registration Pattern
+```csharp
+services.AddScoped<MyHandler>();
+services.Configure<MyOptions>(config.GetSection("My"));
+```
 
-## 🔮 Next Phase (Phase 2)
+### Error Handling Pattern
+```csharp
+try
+{
+	// operation
+}
+catch (Exception ex)
+{
+	_logger.LogError(ex, "Error");
+	throw new DomainException("Message", ex);
+}
+```
 
-**Service Bus Integration**
-- Message consumer (receive requests)
-- Event publisher (send completion)
-- End-to-end orchestration
-- Estimated: 4-6 hours
+## Vertical Slice Architecture Benefits
 
-See: PHASE2_SERVICE_BUS_INTEGRATION.md
+✅ Self-contained features – each feature has all code it needs  
+✅ Independent teams – no conflicts between slices  
+✅ Easy to test – mock dependencies at feature level  
+✅ Easy to extend – add new feature without touching others  
+✅ Clear boundaries – contracts define feature interface  
 
----
+## Performance Tips
 
-## 📋 Contacts & References
+- Browser instance is singleton (reused across requests)
+- Use appropriate timeout values (don't set too high)
+- Implement retry logic for transient failures
+- Monitor resource usage in production
+- Use Managed Identity instead of connection strings
 
-**Documentation**: See `docs/` folder
-**Code**: See `src/` and `tests/` folders
-**Tests**: Run with `dotnet test`
-**Build**: Run with `dotnet build`
+## Production Checklist
 
----
+- ✅ Configuration validated on startup
+- ✅ Logging configured for production
+- ✅ Connection strings in Key Vault or Managed Identity
+- ✅ Health checks passing
+- ✅ Tests all passing
+- ✅ Build successful with no warnings
+- ✅ Application Insights configured
+- ✅ Firewall rules configured
+- ✅ Monitoring and alerts set up
+- ✅ Backup strategy in place
 
-**Status**: ✅ PHASE 1 COMPLETE
-**Next**: Phase 2 Service Bus Integration (Ready to Start)
-**When**: Just let me know! 🚀
+## Debugging
 
----
+```bash
+# Enable debug logging
+# Set LogLevel.Default to "Debug" in appsettings.Development.json
 
-*Quick Reference - ScreenToImageConverter*
-*Framework: .NET 9 | Quality: Production-Ready*
+# Attach debugger
+# Set breakpoint and run: dotnet run
+
+# View correlation ID in logs
+# grep "CorrelationId" application.log
+
+# Check Message
+# az servicebus queue peek --namespace-name ... --name ...
+```
+
+## Links
+
+- [Microsoft Playwright .NET](https://playwright.dev/dotnet/)
+- [Azure Service Bus](https://docs.microsoft.com/en-us/azure/service-bus-messaging/)
+- [Azure Storage](https://docs.microsoft.com/en-us/azure/storage/)
+- [.NET 9](https://docs.microsoft.com/en-us/dotnet/)
+- [GitHub Repository](https://github.com/jerishpj/ScreenToImageConverter)
