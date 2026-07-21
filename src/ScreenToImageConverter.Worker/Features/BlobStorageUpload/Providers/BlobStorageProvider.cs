@@ -1,4 +1,5 @@
 using Azure;
+using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
@@ -8,11 +9,12 @@ using ScreenToImageConverter.Shared.Configuration;
 using ScreenToImageConverter.Shared.Exceptions;
 using ScreenToImageConverter.Shared.Interfaces;
 
-namespace ScreenToImageConverter.Infrastructure.Providers;
+namespace ScreenToImageConverter.Worker.Features.BlobStorageUpload.Providers;
 
 /// <summary>
 /// Implementation of IBlobStorageProvider using Azure Blob Storage.
 /// Handles blob upload, SAS URL generation, and lifecycle management.
+/// Part of the BlobStorageUpload vertical slice.
 /// </summary>
 public class BlobStorageProvider : IBlobStorageProvider
 {
@@ -307,7 +309,7 @@ public class BlobStorageProvider : IBlobStorageProvider
             }
 
             var accountUri = new Uri($"https://{_options.AccountName}.blob.core.windows.net");
-            return new BlobServiceClient(accountUri, new Azure.Identity.DefaultAzureCredential());
+            return new BlobServiceClient(accountUri, new DefaultAzureCredential());
         }
         else
         {

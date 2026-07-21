@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
-using ScreenToImageConverter.Infrastructure.Extensions;
-using ScreenToImageConverter.Shared.Interfaces;
 using ScreenToImageConverter.Worker;
 using ScreenToImageConverter.Worker.Extensions;
+using ScreenToImageConverter.Worker.Features.BlobStorageUpload.Extensions;
+using ScreenToImageConverter.Worker.Features.ScreenshotCapture.Extensions;
+using ScreenToImageConverter.Worker.Features.ServiceBusMessaging.Extensions;
+using ScreenToImageConverter.Worker.Features.ServiceBusMessaging.Handlers;
 
 try
 {
@@ -26,12 +28,13 @@ try
     // Register application configuration with validation
     builder.Services.AddApplicationConfiguration(builder.Configuration);
 
-    // Register infrastructure services
-    builder.Services.AddPlaywrightScreenshotProvider();
-    builder.Services.AddBlobStorageProvider();
+    // Register vertical slice features
+    builder.Services.AddScreenshotCaptureFeature();
+    builder.Services.AddBlobStorageUploadFeature();
+    builder.Services.AddServiceBusMessagingFeature();
 
-    // Register resilience policies
-    builder.Services.AddResiliencePolicies();
+    // Register orchestrator
+    builder.Services.AddScoped<ScreenshotProcessingOrchestrator>();
 
     // Add health checks
     builder.Services.AddApplicationHealthChecks();
@@ -48,8 +51,7 @@ try
 
     // Initialize Playwright provider
     logger.LogInformation("Initializing Playwright screenshot provider...");
-    var screenshotProvider = host.Services.GetRequiredService<IScreenshotProvider>();
-    await screenshotProvider.InitializeAsync(CancellationToken.None);
+    await host.Services.InitializePlaywrightAsync(CancellationToken.None);
 
     await host.RunAsync();
 }

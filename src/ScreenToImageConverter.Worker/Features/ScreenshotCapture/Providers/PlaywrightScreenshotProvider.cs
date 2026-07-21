@@ -5,11 +5,12 @@ using ScreenToImageConverter.Shared.Configuration;
 using ScreenToImageConverter.Shared.Exceptions;
 using ScreenToImageConverter.Shared.Interfaces;
 
-namespace ScreenToImageConverter.Infrastructure.Providers;
+namespace ScreenToImageConverter.Worker.Features.ScreenshotCapture.Providers;
 
 /// <summary>
 /// Implementation of IScreenshotProvider using Microsoft Playwright.
 /// Handles browser automation, page navigation, and screenshot capture.
+/// Part of the ScreenshotCapture vertical slice.
 /// </summary>
 public class PlaywrightScreenshotProvider : IScreenshotProvider
 {

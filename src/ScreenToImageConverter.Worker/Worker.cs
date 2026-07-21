@@ -1,54 +1,66 @@
+using ScreenToImageConverter.Shared.Interfaces;
+using ScreenToImageConverter.Worker.Features.ServiceBusMessaging.Consumers;
+using ScreenToImageConverter.Worker.Features.ServiceBusMessaging.Handlers;
+
 namespace ScreenToImageConverter.Worker;
 
 /// <summary>
 /// Main background service for the screenshot processing worker.
-/// Coordinates message consumption, screenshot capture, blob storage upload, and event publishing.
+/// Orchestrates vertical slice features:
+/// - ServiceBusMessaging: Listens for HtmlScreenshotRequest messages
+/// - ScreenshotCapture: Captures screenshots using Playwright
+/// - BlobStorageUpload: Uploads screenshots to Azure Blob Storage
+/// - Event Publishing: Publishes ScreenshotCompletedEvent to downstream consumers
 /// 
 /// Workflow:
-/// 1. Listens for HtmlScreenshotRequest messages on Service Bus topic subscription
-/// 2. Validates the incoming request
-/// 3. Uses PlaywrightScreenshotProvider to capture the page screenshot
-/// 4. Uploads the PNG to Azure Blob Storage via BlobStorageProvider
-/// 5. Publishes ScreenshotCompletedEvent to Service Bus topic for downstream consumers
-/// 6. Handles errors and retries with resilience policies
-/// 
-/// TODO: Implement these steps in ExecuteAsync once Service Bus consumer is ready
+/// 1. Starts Service Bus consumer to listen for HtmlScreenshotRequest messages
+/// 2. For each incoming message:
+///    a. Passes to ScreenshotProcessingOrchestrator
+///    b. Orchestrator: Validate → Capture → Upload → Publish completion event
+///    c. Handles errors and publishes failure events
+/// 3. Keeps the service running until cancellation is requested
 /// </summary>
 public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IHostApplicationLifetime _hostApplicationLifetime;
+    private readonly IMessageConsumer _messageConsumer;
+    private readonly ScreenshotProcessingOrchestrator _orchestrator;
 
     public Worker(
         ILogger<Worker> logger,
-        IHostApplicationLifetime hostApplicationLifetime)
+        IHostApplicationLifetime hostApplicationLifetime,
+        IMessageConsumer messageConsumer,
+        ScreenshotProcessingOrchestrator orchestrator)
     {
-        _logger = logger;
-        _hostApplicationLifetime = hostApplicationLifetime;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _hostApplicationLifetime = hostApplicationLifetime ?? throw new ArgumentNullException(nameof(hostApplicationLifetime));
+        _messageConsumer = messageConsumer ?? throw new ArgumentNullException(nameof(messageConsumer));
+        _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
     }
 
     /// <summary>
     /// Entry point for the background service.
-    /// Keeps the service running until cancellation is requested.
+    /// Initializes the message consumer and keeps the service running until cancellation.
     /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("🎯 Worker service started. Waiting for screenshot requests from Service Bus...");
+        _logger.LogInformation("🎯 Worker service started. Initializing vertical slice features...");
 
         try
         {
-            // TODO: Step 6 Implementation:
-            // 1. Inject IMessageConsumer for Service Bus topic subscription
-            // 2. Call messageConsumer.StartAsync(stoppingToken)
-            // 3. Implement message handler callback with:
-            //    - Request validation
-            //    - Screenshot capture orchestration
-            //    - Blob upload and SAS URL generation
-            //    - Completion event publishing
-            //    - Error handling and retries
-            // 4. Keep the service running by awaiting the consumer
+            // Register message handler with the consumer
+            if (_messageConsumer is ServiceBusMessageConsumer serviceBusConsumer)
+            {
+                serviceBusConsumer.RegisterMessageHandler(ProcessMessageAsync);
+            }
 
-            // Placeholder: Keep the service running until cancellation is requested
+            _logger.LogInformation("📢 Starting Service Bus message consumer...");
+            await _messageConsumer.StartAsync(stoppingToken);
+
+            _logger.LogInformation("✅ Worker service ready. Listening for screenshot requests...");
+
+            // Keep the service running until cancellation is requested
             while (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(1000, stoppingToken);
@@ -68,7 +80,32 @@ public class Worker : BackgroundService
     }
 
     /// <summary>
+    /// Message handler callback for processing incoming Service Bus messages.
+    /// Delegates to the ScreenshotProcessingOrchestrator.
+    /// </summary>
+    private async Task ProcessMessageAsync(
+        ScreenToImageConverter.Shared.Messages.HtmlScreenshotRequest request,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _orchestrator.ProcessScreenshotAsync(request, correlationId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "❌ Message processing failed [RequestId: {RequestId}, CorrelationId: {CorrelationId}]",
+                request.RequestId,
+                correlationId);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Called when the service is starting.
+    /// Initializes infrastructure.
     /// </summary>
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -78,21 +115,48 @@ public class Worker : BackgroundService
 
     /// <summary>
     /// Called when the service is stopping.
-    /// Allows for graceful shutdown of resources.
+    /// Gracefully shuts down the message consumer.
     /// </summary>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("⏹️ Worker service stopping...");
+
+        try
+        {
+            if (_messageConsumer != null)
+            {
+                await _messageConsumer.StopAsync(cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error stopping message consumer");
+        }
+
         await base.StopAsync(cancellationToken);
         _logger.LogInformation("✅ Worker service stopped");
     }
 
     /// <summary>
     /// Called when the service is disposed.
+    /// Cleans up resources.
     /// </summary>
-    public override void Dispose()
+    public override async void Dispose()
     {
         _logger.LogInformation("🧹 Worker service disposing");
+
+        try
+        {
+            if (_messageConsumer != null)
+            {
+                await _messageConsumer.DisposeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error disposing message consumer");
+        }
+
         base.Dispose();
     }
 }
