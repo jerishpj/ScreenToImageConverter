@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging;
-using ScreenToImageConverter.Shared.Interfaces;
+using ScreenToImageConverter.Worker.Infrastructure.Screenshots;
 
 namespace ScreenToImageConverter.Tests.Fixtures;
 

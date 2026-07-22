@@ -1,8 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
-using ScreenToImageConverter.Shared.Configuration;
-using ScreenToImageConverter.Shared.Interfaces;
+using ScreenToImageConverter.Worker.AppSettings;
+using ScreenToImageConverter.Worker.Infrastructure.Screenshots;
+using ScreenToImageConverter.Worker.Infrastructure.Storage;
 
 namespace ScreenToImageConverter.Worker.Extensions;
 
@@ -67,18 +68,18 @@ internal class PlaywrightHealthCheck : IHealthCheck
 /// </summary>
 internal class BlobStorageHealthCheck : IHealthCheck
 {
-    private readonly IBlobStorageProvider _blobStorageProvider;
+    private readonly IBlobStorageService _blobStorageService;
 
-    public BlobStorageHealthCheck(IBlobStorageProvider blobStorageProvider)
+    public BlobStorageHealthCheck(IBlobStorageService blobStorageService)
     {
-        _blobStorageProvider = blobStorageProvider;
+        _blobStorageService = blobStorageService;
     }
 
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         try
         {
-            var isConnected = await _blobStorageProvider.IsConnectedAsync(cancellationToken);
+            var isConnected = await _blobStorageService.IsConnectedAsync(cancellationToken);
             return isConnected
                 ? HealthCheckResult.Healthy("Blob Storage is accessible.")
                 : HealthCheckResult.Unhealthy("Blob Storage is not accessible.");
@@ -96,16 +97,16 @@ internal class BlobStorageHealthCheck : IHealthCheck
 internal class ConfigurationHealthCheck : IHealthCheck
 {
     private readonly IOptionsSnapshot<ServiceBusOptions> _serviceBusOptions;
-    private readonly IOptionsSnapshot<BlobStorageOptions> _blobStorageOptions;
+    private readonly IOptionsSnapshot<BlobStorageOptions> _storageSettings;
     private readonly IOptionsSnapshot<PlaywrightOptions> _playwrightOptions;
 
     public ConfigurationHealthCheck(
         IOptionsSnapshot<ServiceBusOptions> serviceBusOptions,
-        IOptionsSnapshot<BlobStorageOptions> blobStorageOptions,
+        IOptionsSnapshot<BlobStorageOptions> storageSettings,
         IOptionsSnapshot<PlaywrightOptions> playwrightOptions)
     {
         _serviceBusOptions = serviceBusOptions;
-        _blobStorageOptions = blobStorageOptions;
+        _storageSettings = storageSettings;
         _playwrightOptions = playwrightOptions;
     }
 
@@ -115,7 +116,7 @@ internal class ConfigurationHealthCheck : IHealthCheck
         {
             var errors = new List<string>();
             errors.AddRange(_serviceBusOptions.Value.Validate());
-            errors.AddRange(_blobStorageOptions.Value.Validate());
+            errors.AddRange(_storageSettings.Value.Validate());
             errors.AddRange(_playwrightOptions.Value.Validate());
 
             return Task.FromResult(errors.Count == 0
