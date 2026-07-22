@@ -81,7 +81,8 @@ public class ServiceBusEventPublisherTests
         badOptionsMock.Setup(o => o.Value).Returns(badOptions);
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() =>
+        // Azure Service Bus SDK throws FormatException for invalid connection strings
+        Assert.Throws<FormatException>(() =>
             new ServiceBusEventPublisher(badOptionsMock.Object, _loggerMock.Object));
     }
 
