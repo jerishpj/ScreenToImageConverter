@@ -1,12 +1,17 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using ScreenToImageConverter.Shared.Configuration;
-using ScreenToImageConverter.Shared.Exceptions;
+using Microsoft.Playwright;
+using ScreenToImageConverter.Worker.AppSettings;
+using ScreenToImageConverter.Worker.Features.ConvertHtmlToImage;
+using ScreenToImageConverter.Worker.Infrastructure.Notifications;
+using ScreenToImageConverter.Worker.Infrastructure.Screenshots;
+using ScreenToImageConverter.Worker.Infrastructure.Storage;
 
 namespace ScreenToImageConverter.Worker.Extensions;
 
 /// <summary>
 /// Extension methods for registering services in the dependency injection container.
+/// Consolidates vertical slice architecture registration.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -17,15 +22,15 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Register and validate ServiceBusOptions
-        services.Configure<ServiceBusOptions>(configuration.GetSection(ServiceBusOptions.SectionName));
-        var serviceBusOptions = configuration.GetSection(ServiceBusOptions.SectionName).Get<ServiceBusOptions>();
-        ValidateOptions(serviceBusOptions, nameof(ServiceBusOptions));
+        // Register and validate Notification (ServiceBus) settings
+        services.Configure<NotificationSettings>(configuration.GetSection(NotificationSettings.SectionName));
+        var notificationSettings = configuration.GetSection(NotificationSettings.SectionName).Get<NotificationSettings>();
+        ValidateOptions(notificationSettings, nameof(NotificationSettings));
 
-        // Register and validate BlobStorageOptions
-        services.Configure<BlobStorageOptions>(configuration.GetSection(BlobStorageOptions.SectionName));
-        var blobStorageOptions = configuration.GetSection(BlobStorageOptions.SectionName).Get<BlobStorageOptions>();
-        ValidateOptions(blobStorageOptions, nameof(BlobStorageOptions));
+        // Register and validate Storage (BlobStorage) settings
+        services.Configure<StorageSettings>(configuration.GetSection(StorageSettings.SectionName));
+        var storageSettings = configuration.GetSection(StorageSettings.SectionName).Get<StorageSettings>();
+        ValidateOptions(storageSettings, nameof(StorageSettings));
 
         // Register and validate PlaywrightOptions
         services.Configure<PlaywrightOptions>(configuration.GetSection(PlaywrightOptions.SectionName));
@@ -36,17 +41,43 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers resilience policies (retry, circuit breaker, timeouts).
-    /// These policies protect the application from cascading failures.
+    /// Registers the ConvertHtmlToImage feature with all its dependencies.
     /// </summary>
-    public static IServiceCollection AddResiliencePolicies(this IServiceCollection services)
+    public static IServiceCollection AddConvertHtmlToImageFeature(
+        this IServiceCollection services)
     {
-        // TODO: Register Polly policies for:
-        // - Service Bus: exponential backoff retry (3 attempts, 1-5 second delays)
-        // - Blob Storage: exponential backoff retry (3 attempts, 1-5 second delays)
-        // - Playwright: timeout policy (30 second per request) with circuit breaker
-        // - Overall timeout for entire screenshot pipeline (60 seconds)
-        // These will be integrated into the Consumer and Provider implementations
+        // Register the feature handler
+        services.AddScoped<ConvertHtmlToImageHandler>();
+
+        // Register infrastructure services
+        services.AddInfrastructureNotifications();
+        services.AddInfrastructureStorage();
+
+        // Register screenshot provider
+        services.AddSingleton<IScreenshotProvider, PlaywrightScreenshotProvider>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers notification (Service Bus) infrastructure components.
+    /// </summary>
+    public static IServiceCollection AddInfrastructureNotifications(
+        this IServiceCollection services)
+    {
+        services.AddScoped<IMessageConsumer, ServiceBusConsumer>();
+        services.AddScoped<IMessagePublisher, ServiceBusPublisher>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers storage (Blob Storage) infrastructure components.
+    /// </summary>
+    public static IServiceCollection AddInfrastructureStorage(
+        this IServiceCollection services)
+    {
+        services.AddScoped<IBlobStorageService, BlobStorageService>();
 
         return services;
     }
@@ -58,7 +89,7 @@ public static class ServiceCollectionExtensions
     {
         if (options == null)
         {
-            throw new ConfigurationException(
+            throw new Exception(
                 $"Configuration section '{optionName}' is missing from appsettings. " +
                 $"Please add the required configuration.");
         }
@@ -71,9 +102,24 @@ public static class ServiceCollectionExtensions
             if (errors?.Count > 0)
             {
                 var errorMessage = string.Join("; ", errors);
-                throw new ConfigurationException(
+                throw new Exception(
                     $"Configuration validation failed for '{optionName}': {errorMessage}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Initializes the Playwright screenshot provider.
+    /// Must be called after the host is built.
+    /// </summary>
+    public static async Task InitializePlaywrightAsync(
+        this IServiceProvider services,
+        CancellationToken cancellationToken)
+    {
+        var screenshotProvider = services.GetRequiredService<IScreenshotProvider>();
+        if (screenshotProvider is PlaywrightScreenshotProvider playwrightProvider)
+        {
+            await playwrightProvider.InitializeAsync(cancellationToken);
         }
     }
 }

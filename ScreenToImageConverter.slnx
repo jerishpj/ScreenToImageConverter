@@ -1,7 +1,1 @@
-<Solution>
-  <Project Path="src/ScreenToImageConverter.Shared/ScreenToImageConverter.Shared.csproj" />
-  <Project Path="src/ScreenToImageConverter.Core/ScreenToImageConverter.Core.csproj" />
-  <Project Path="src/ScreenToImageConverter.Infrastructure/ScreenToImageConverter.Infrastructure.csproj" />
-  <Project Path="src/ScreenToImageConverter.Worker/ScreenToImageConverter.Worker.csproj" />
-  <Project Path="tests/ScreenToImageConverter.Tests/ScreenToImageConverter.Tests.csproj" />
-</Solution>
+<Solution>  <Folder Name="/src/">    <Project Path="src/ScreenToImageConverter.Worker/ScreenToImageConverter.Worker.csproj" />  </Folder>  <Folder Name="/tests/">    <Project Path="tests/ScreenToImageConverter.Tests/ScreenToImageConverter.Tests.csproj" />  </Folder></Solution>

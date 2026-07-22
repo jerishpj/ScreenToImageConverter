@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
-using ScreenToImageConverter.Infrastructure.Extensions;
-using ScreenToImageConverter.Shared.Interfaces;
 using ScreenToImageConverter.Worker;
 using ScreenToImageConverter.Worker.Extensions;
 
@@ -14,7 +12,7 @@ try
         .MinimumLevel.Information()
         .Enrich.FromLogContext()
         .Enrich.WithEnvironmentName()
-        .Enrich.WithProperty("Application", "ScreenToImageConverter.Worker")
+        .Enrich.WithProperty("Application", "HtmlToImageWorker")
         .WriteTo.Console()
         .CreateLogger();
 
@@ -26,12 +24,8 @@ try
     // Register application configuration with validation
     builder.Services.AddApplicationConfiguration(builder.Configuration);
 
-    // Register infrastructure services
-    builder.Services.AddPlaywrightScreenshotProvider();
-    builder.Services.AddBlobStorageProvider();
-
-    // Register resilience policies
-    builder.Services.AddResiliencePolicies();
+    // Register the main ConvertHtmlToImage feature (vertical slice)
+    builder.Services.AddConvertHtmlToImageFeature();
 
     // Add health checks
     builder.Services.AddApplicationHealthChecks();
@@ -43,13 +37,12 @@ try
 
     // Log application startup
     var logger = host.Services.GetRequiredService<ILogger<Program>>();
-    logger.LogInformation("🚀 ScreenToImageConverter Worker Service starting...");
+    logger.LogInformation("🚀 HtmlToImageWorker Service starting...");
     logger.LogInformation("Environment: {Environment}", host.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
 
     // Initialize Playwright provider
     logger.LogInformation("Initializing Playwright screenshot provider...");
-    var screenshotProvider = host.Services.GetRequiredService<IScreenshotProvider>();
-    await screenshotProvider.InitializeAsync(CancellationToken.None);
+    await host.Services.InitializePlaywrightAsync(CancellationToken.None);
 
     await host.RunAsync();
 }
