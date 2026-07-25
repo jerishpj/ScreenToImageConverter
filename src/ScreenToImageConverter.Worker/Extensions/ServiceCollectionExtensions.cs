@@ -22,10 +22,37 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+
         // Register and validate Notification (ServiceBus) settings
         services.Configure<NotificationSettings>(configuration.GetSection(NotificationSettings.SectionName));
         var notificationSettings = configuration.GetSection(NotificationSettings.SectionName).Get<NotificationSettings>();
         ValidateOptions(notificationSettings, nameof(NotificationSettings));
+
+        // Add RabbitMQ configuration
+        services.Configure<RabbitMqOptions>(
+            services.BuildServiceProvider()
+                .GetRequiredService<IConfiguration>()
+                .GetSection("RabbitMq"));
+
+        // Validate RabbitMQ options if development environment
+        var serviceProvider = services.BuildServiceProvider();
+        var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
+
+        if (environment.IsDevelopment())
+        {
+            var rabbitMqOptions = configuration.GetSection("RabbitMq").Get<RabbitMqOptions>();
+            ValidateOptions(rabbitMqOptions, nameof(RabbitMqOptions));
+
+            // Use RabbitMQ for local development (free, no costs)
+            services.AddScoped<IMessageConsumer, RabbitMqConsumer>();
+            services.AddScoped<IMessagePublisher, RabbitMqPublisher>();
+        }
+        else
+        {
+            // Use Azure Service Bus for production
+            services.AddScoped<IMessageConsumer, ServiceBusConsumer>();
+            services.AddScoped<IMessagePublisher, ServiceBusPublisher>();
+        }
 
         // Register and validate Storage (BlobStorage) settings
         services.Configure<StorageSettings>(configuration.GetSection(StorageSettings.SectionName));

@@ -16,44 +16,51 @@ namespace ScreenToImageConverter.Worker;
 ///    b. Handler: Validate → Capture → Upload → Publish completion event
 ///    c. Handles errors gracefully
 /// 3. Keeps the service running until cancellation is requested
+/// 
+/// IMPORTANT: This class uses IServiceProvider to create scopes for scoped services.
+/// BackgroundService (IHostedService) is a singleton and cannot directly inject scoped dependencies.
+/// Solution: Use _serviceProvider.CreateScope() to get scoped instances when needed.
 /// </summary>
 public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IHostApplicationLifetime _hostApplicationLifetime;
-    private readonly IMessageConsumer _messageConsumer;
-    private readonly ConvertHtmlToImageHandler _handler;
+    private readonly IServiceProvider _serviceProvider;
 
     public Worker(
         ILogger<Worker> logger,
         IHostApplicationLifetime hostApplicationLifetime,
-        IMessageConsumer messageConsumer,
-        ConvertHtmlToImageHandler handler)
+        IServiceProvider serviceProvider)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _hostApplicationLifetime = hostApplicationLifetime ?? throw new ArgumentNullException(nameof(hostApplicationLifetime));
-        _messageConsumer = messageConsumer ?? throw new ArgumentNullException(nameof(messageConsumer));
-        _handler = handler ?? throw new ArgumentNullException(nameof(handler));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     }
 
     /// <summary>
     /// Entry point for the background service.
     /// Initializes the message consumer and keeps the service running until cancellation.
+    /// Creates scoped services within a using statement to ensure proper disposal.
     /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("🎯 Worker service started. Initializing ConvertHtmlToImage feature...");
 
+        // Create a scope for scoped services (IMessageConsumer, ConvertHtmlToImageHandler)
+        // This scope lives for the duration of the ExecuteAsync method
+        using var scope = _serviceProvider.CreateScope();
+        var messageConsumer = scope.ServiceProvider.GetRequiredService<IMessageConsumer>();
+
         try
         {
             // Register message handler with the consumer
-            if (_messageConsumer is ServiceBusConsumer serviceBusConsumer)
+            if (messageConsumer is ServiceBusConsumer serviceBusConsumer)
             {
                 serviceBusConsumer.RegisterMessageHandler(ProcessMessageAsync);
             }
 
             _logger.LogInformation("📢 Starting Service Bus message consumer...");
-            await _messageConsumer.StartAsync(stoppingToken);
+            await messageConsumer.StartAsync(stoppingToken);
 
             _logger.LogInformation("✅ Worker service ready. Listening for HTML to image conversion requests...");
 
@@ -64,6 +71,7 @@ public class Worker : BackgroundService
             }
 
             _logger.LogInformation("🛑 Shutting down worker service gracefully...");
+            await messageConsumer.StopAsync(stoppingToken);
         }
         catch (OperationCanceledException)
         {
@@ -78,13 +86,18 @@ public class Worker : BackgroundService
 
     /// <summary>
     /// Message handler callback for processing incoming Service Bus messages.
-    /// Delegates to the ConvertHtmlToImageHandler.
+    /// Creates a new scope for scoped services (ConvertHtmlToImageHandler, IBlobStorageService, IMessagePublisher).
     /// </summary>
     private async Task ProcessMessageAsync(
         HtmlScreenshotRequest request,
         string correlationId,
         CancellationToken cancellationToken)
     {
+        // Create a new scope for this message processing
+        // Each message gets its own scope with fresh instances of scoped services
+        using var scope = _serviceProvider.CreateScope();
+        var handler = scope.ServiceProvider.GetRequiredService<ConvertHtmlToImageHandler>();
+
         try
         {
             _logger.LogInformation(
@@ -106,8 +119,8 @@ public class Worker : BackgroundService
                 ScreenshotName = request.ScreenshotName
             };
 
-            // Process the command
-            await _handler.HandleAsync(command, cancellationToken);
+            // Process the command using the scoped handler
+            await handler.HandleAsync(command, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -128,52 +141,5 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("⏱️ Worker service starting...");
         await base.StartAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Called when the service is stopping.
-    /// Gracefully shuts down the message consumer.
-    /// </summary>
-    public override async Task StopAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("⏹️ Worker service stopping...");
-
-        try
-        {
-            if (_messageConsumer != null)
-            {
-                await _messageConsumer.StopAsync(cancellationToken);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error stopping message consumer");
-        }
-
-        await base.StopAsync(cancellationToken);
-        _logger.LogInformation("✅ Worker service stopped");
-    }
-
-    /// <summary>
-    /// Called when the service is disposed.
-    /// Cleans up resources.
-    /// </summary>
-    public override async void Dispose()
-    {
-        _logger.LogInformation("🧹 Worker service disposing");
-
-        try
-        {
-            if (_messageConsumer != null)
-            {
-                await _messageConsumer.DisposeAsync();
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error disposing message consumer");
-        }
-
-        base.Dispose();
     }
 }
