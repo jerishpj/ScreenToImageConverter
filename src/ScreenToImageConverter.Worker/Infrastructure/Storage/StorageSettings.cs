@@ -33,7 +33,7 @@ public class StorageSettings
     /// Whether to use Managed Identity for authentication.
     /// If true, AccountName must be set; ConnectionString is ignored.
     /// </summary>
-    public bool UseManagedIdentity { get; set; } = true;
+    public bool UseManagedIdentity { get; set; } = false;
 
     /// <summary>
     /// Duration in minutes for which SAS URLs are valid.

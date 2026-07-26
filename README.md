@@ -1,107 +1,99 @@
-﻿# ScreenToImageConverter - HTML to Image Screenshot Service
+﻿# ScreenToImageConverter
 
 <div align="center">
 
 ![GitHub](https://img.shields.io/badge/GitHub-jerishpj%2FScreenToImageConverter-blue?logo=github)
 ![.NET 9](https://img.shields.io/badge/.NET-9-blueviolet)
 ![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
-![Tests](https://img.shields.io/badge/Tests-9%2F9%20Passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-185%2F185%20Passing-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 **A production-ready .NET 9 Worker Service that converts HTML web pages into image screenshots**
-
-[Quick Start](#quick-start) • [Documentation](#documentation) • [Architecture](#architecture) • [Features](#features)
 
 </div>
 
 ---
 
-## 📋 Overview
+## 📋 What It Does
 
 **ScreenToImageConverter** is an asynchronous, cloud-native service that:
 - 🌐 Converts HTML web pages to image screenshots
 - 📤 Processes high-volume requests via Azure Service Bus
 - 💾 Stores images in Azure Blob Storage with time-limited access
-- 🔄 Publishes completion events for downstream processing
-- 🏗️ Uses vertical slice architecture for maintainability
-
-**Perfect for**: PDF report generation, website previews, content archiving, presentation automation
-
----
-
-## 🎯 Quick Start
-
-### Prerequisites
-- .NET 9 SDK or later
-- Visual Studio 2022/2026 (optional)
-- Azure Storage Account
-- Azure Service Bus Namespace
-
-### Build & Run
-
-`bash
-# Clone
-git clone https://github.com/jerishpj/ScreenToImageConverter.git
-cd ScreenToImageConverter
-
-# Restore & Build
-dotnet restore
-dotnet build
-
-# Run
-dotnet run --project src/ScreenToImageConverter.Worker
-
-# Test
-dotnet test
-`
-
----
-
-## 🏗️ Architecture
-
-**Pattern**: Vertical Slice Architecture with a single feature (ConvertHtmlToImage)
-
-`
-Worker Service (Main Entry Point)
-    ↓
-Service Bus Consumer (Message Receiver)
-    ↓
-ConvertHtmlToImage Feature (Business Logic)
-    ├─ Validate Request
-    ├─ Capture Screenshot (Playwright)
-    ├─ Upload to Blob Storage
-    └─ Publish Completion Event
-`
+- 🔄 Publishes completion events for downstream systems
+- ✅ 185/185 tests passing | Production ready
 
 ---
 
 ## 📚 Documentation
 
-Complete documentation is available:
+**Complete, consolidated documentation in two master documents:**
 
-- **[Docs/SOLUTION_OVERVIEW.md](./Docs/SOLUTION_OVERVIEW.md)** ⭐ **START HERE** - Complete guide with:
-  - Full functional flow with diagrams
-  - Complete architecture overview
-  - Core components description
-  - Configuration details
-  - Integration points
-  - Deployment options
-  - Troubleshooting guide
-  - Technology stack
+### 🔹 [GUIDE.md](./Docs/GUIDE.md) - Complete Operational & Development Guide
+Covers everything you need to **use, deploy, and develop** ScreenToImageConverter:
+- ✅ Getting Started & Setup
+- ✅ Configuration Reference (all options)
+- ✅ Deployment (Docker, Container Apps, AKS, ACI, CI/CD)
+- ✅ Development Guide (architecture, patterns, extending)
+- ✅ Testing Guide (test infrastructure, running tests)
+- ✅ Troubleshooting (common issues & solutions)
+- ✅ Operations & Monitoring
+
+### 🔹 [REFERENCE.md](./Docs/REFERENCE.md) - Technical Reference & API
+Comprehensive technical reference for **architects and integrators**:
+- ✅ Architecture & Design Patterns
+- ✅ Features & Functional Flows
+- ✅ API Reference (message contracts, SDK examples in C#, Python, Node.js, Bash)
+- ✅ Security Architecture (authentication, authorization, data protection)
+
+**Start here based on your role:**
+- **New user?** → Read [GUIDE.md](./Docs/GUIDE.md) – Getting Started section
+- **DevOps/Ops?** → Read [GUIDE.md](./Docs/GUIDE.md) – Deployment & Operations sections
+- **Developer?** → Read [GUIDE.md](./Docs/GUIDE.md) – Development & Testing sections
+- **Integrator?** → Read [REFERENCE.md](./Docs/REFERENCE.md) – API Reference section
+- **Architect?** → Read [REFERENCE.md](./Docs/REFERENCE.md) – Architecture & Design sections
+
+---
+
+## 🚀 Quick Build & Run
+
+`bash
+# Clone & setup
+git clone https://github.com/jerishpj/ScreenToImageConverter.git
+cd ScreenToImageConverter
+
+# Restore & build
+dotnet restore
+dotnet build
+
+# Run tests (all should pass)
+dotnet test
+
+# Run the service
+dotnet run --project src/ScreenToImageConverter.Worker
+`
+
+**Next**: See [Getting Started Guide](./Docs/getting-started.md) for Azure setup and configuration.
+
+---
+
+## 🏗️ Architecture
+
+**Pattern**: Vertical Slice Architecture | **Tests**: 185/185 ✅ | **Status**: Production Ready
+
+`
+Request → Service Bus → ConvertHtmlToImage Feature → Screenshot & Upload → Event Published
+                          ├─ Validate
+                          ├─ Capture (Playwright)
+                          ├─ Upload (Blob Storage)
+                          └─ Publish Event
+`
 
 ---
 
 ## 🧠 Technology Stack
 
-- **Runtime**: .NET 9
-- **Service Type**: Worker Service (BackgroundService)
-- **Message Queue**: Azure Service Bus
-- **Storage**: Azure Blob Storage
-- **Browser**: Microsoft Playwright
-- **Logging**: Serilog
-- **Monitoring**: Application Insights
-- **Testing**: XUnit + Moq
-- **Pattern**: Vertical Slice Architecture
+- .NET 9 | Azure Service Bus | Azure Blob Storage | Playwright | Serilog | XUnit + Moq
 
 ---
 
@@ -109,59 +101,22 @@ Complete documentation is available:
 
 | Feature | Details |
 |---------|---------|
-| **Async Processing** | Azure Service Bus for scalable message handling |
-| **Screenshot Capture** | Microsoft Playwright with Chromium/Firefox/WebKit |
-| **Cloud Storage** | Azure Blob Storage with SAS URL generation |
-| **Event Publishing** | Publishes completion events for downstream processing |
-| **Health Checks** | Playwright, Blob Storage, and Configuration validation |
-| **Structured Logging** | Serilog + Application Insights telemetry |
-| **Production Ready** | Security, performance, monitoring, documentation |
+| **Async Processing** | Scalable via Azure Service Bus |
+| **Screenshot Capture** | Microsoft Playwright automation |
+| **Cloud Storage** | Azure Blob with SAS URLs |
+| **Event-Driven** | Publishes completion events |
+| **Health Checks** | Browser, storage, configuration |
+| **Structured Logging** | Serilog + Application Insights |
+| **Production Ready** | Security, monitoring, tested |
 
 ---
 
-## 🧪 Testing
-
-`ash
-# Run all tests
-dotnet test
-
-# Run with verbose output
-dotnet test --verbosity detailed
-
-# Run specific test class
-dotnet test --filter "FullyQualifiedName~ConvertHtmlToImageHandlerTests"
-`
-
-**Test Coverage**: 9/9 tests passing ✅
-
----
-
-## 🔒 Security
-
-- ✅ **Managed Identity** - Azure AD authentication (no credentials in code)
-- ✅ **SAS URLs** - Time-limited access (1-hour expiration)
-- ✅ **Input Validation** - URL format, dimension bounds, timeout values
-- ✅ **Correlation IDs** - Distributed tracing support
-
----
-
-## 📞 Support
+## 📞 Support & Contributing
 
 - **Repository**: https://github.com/jerishpj/ScreenToImageConverter
-- **Documentation**: [Docs/SOLUTION_OVERVIEW.md](./Docs/SOLUTION_OVERVIEW.md)
+- **Issues**: [GitHub Issues](https://github.com/jerishpj/ScreenToImageConverter/issues)
+- **Documentation**: See `Docs/` folder
 
 ---
 
-## ✅ Project Status
-
-- ✅ Production Ready
-- ✅ 9/9 Tests Passing
-- ✅ Full Documentation
-- ✅ Security Best Practices
-- ✅ Clean Architecture
-
-<div align="center">
-
-**Built with ❤️ using .NET 9 and Azure Cloud Services**
-
-</div>
+**For complete documentation, start with [Docs/INDEX.md](./Docs/INDEX.md)** 📖

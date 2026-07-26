@@ -18,7 +18,7 @@ public class ConvertHtmlToImageHandler
     private readonly IBlobStorageService _blobStorageService;
     private readonly IMessagePublisher _messagePublisher;
     private readonly PlaywrightOptions _playwrightOptions;
-    private readonly BlobStorageOptions _blobStorageOptions;
+    private readonly StorageSettings _storageSettings;
     private readonly ILogger<ConvertHtmlToImageHandler> _logger;
 
     public ConvertHtmlToImageHandler(
@@ -26,14 +26,14 @@ public class ConvertHtmlToImageHandler
         IBlobStorageService blobStorageService,
         IMessagePublisher messagePublisher,
         IOptions<PlaywrightOptions> playwrightOptions,
-        IOptions<BlobStorageOptions> blobStorageOptions,
+        IOptions<StorageSettings> storageSettings,
         ILogger<ConvertHtmlToImageHandler> logger)
     {
         _screenshotProvider = screenshotProvider ?? throw new ArgumentNullException(nameof(screenshotProvider));
         _blobStorageService = blobStorageService ?? throw new ArgumentNullException(nameof(blobStorageService));
         _messagePublisher = messagePublisher ?? throw new ArgumentNullException(nameof(messagePublisher));
         _playwrightOptions = playwrightOptions?.Value ?? throw new ArgumentNullException(nameof(playwrightOptions));
-        _blobStorageOptions = blobStorageOptions?.Value ?? throw new ArgumentNullException(nameof(blobStorageOptions));
+        _storageSettings = storageSettings?.Value ?? throw new ArgumentNullException(nameof(storageSettings));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -102,6 +102,22 @@ public class ConvertHtmlToImageHandler
                 imageData.Length / 1024,
                 correlationId);
 
+            // Step 2.5: Save locally for verification
+            _logger.LogInformation(
+                "💾 Step 2.5/3: Saving image locally for verification [CorrelationId: {CorrelationId}]",
+                correlationId);
+
+            var localFilePath = await SaveImageLocallyAsync(
+                imageData,
+                command.RequestId,
+                correlationId,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "✅ Image saved locally: {LocalPath} [CorrelationId: {CorrelationId}]",
+                localFilePath,
+                correlationId);
+
             // Step 3: Upload to blob storage
             _logger.LogInformation(
                 "☁️ Step 3/3: Uploading to blob storage [CorrelationId: {CorrelationId}]",
@@ -109,7 +125,7 @@ public class ConvertHtmlToImageHandler
 
             var blobName = GenerateBlobName(command.RequestId);
             var uploadResult = await _blobStorageService.UploadAsync(
-                "screenshots",
+                _storageSettings.ContainerName,
                 blobName,
                 imageData,
                 "image/png",
@@ -237,5 +253,60 @@ public class ConvertHtmlToImageHandler
     {
         var now = DateTime.UtcNow;
         return $"screenshots/{now:yyyy/MM/dd}/{requestId}_{now:HHmmss}.png";
+    }
+
+    /// <summary>
+    /// Saves the image data locally to disk for verification purposes.
+    /// Creates a local folder structure: ./output/screenshots/yyyy/MM/dd/
+    /// </summary>
+    private async Task<string> SaveImageLocallyAsync(
+        byte[] imageData,
+        string requestId,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Create local output directory structure
+            var baseOutputPath = Path.Combine(AppContext.BaseDirectory, "output", "screenshots");
+            var now = DateTime.UtcNow;
+            var dateFolder = Path.Combine(baseOutputPath, now.ToString("yyyy"), now.ToString("MM"), now.ToString("dd"));
+
+            // Ensure directory exists
+            if (!Directory.Exists(dateFolder))
+            {
+                Directory.CreateDirectory(dateFolder);
+                _logger.LogDebug(
+                    "📁 Created local directory: {Directory} [CorrelationId: {CorrelationId}]",
+                    dateFolder,
+                    correlationId);
+            }
+
+            // Generate unique filename
+            var filename = $"{requestId}_{now:HHmmss_fff}.png";
+            var localFilePath = Path.Combine(dateFolder, filename);
+
+            // Write file asynchronously
+            await File.WriteAllBytesAsync(localFilePath, imageData, cancellationToken);
+
+            _logger.LogDebug(
+                "📝 Image file written: {Filename}, Size: {SizeKb} KB [CorrelationId: {CorrelationId}]",
+                filename,
+                imageData.Length / 1024,
+                correlationId);
+
+            return localFilePath;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "⚠️ Failed to save image locally. Continuing with blob upload. [CorrelationId: {CorrelationId}]",
+                correlationId);
+
+            // Don't throw - local save is optional for verification
+            // Continue with blob upload anyway
+            return $"(Failed to save locally: {ex.Message})";
+        }
     }
 }

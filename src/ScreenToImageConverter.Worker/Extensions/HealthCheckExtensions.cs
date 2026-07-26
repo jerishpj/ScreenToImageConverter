@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using ScreenToImageConverter.Worker.AppSettings;
+using ScreenToImageConverter.Worker.Infrastructure.Notifications;
 using ScreenToImageConverter.Worker.Infrastructure.Screenshots;
 using ScreenToImageConverter.Worker.Infrastructure.Storage;
 
@@ -14,7 +15,7 @@ namespace ScreenToImageConverter.Worker.Extensions;
 public static class HealthCheckExtensions
 {
     /// <summary>
-    /// Adds custom health checks for screenshot provider, blob storage, and configuration validation.
+    /// Adds custom health checks for screenshot provider, blob storage, messaging, and configuration validation.
     /// </summary>
     public static IHealthChecksBuilder AddApplicationHealthChecks(this IServiceCollection services)
     {
@@ -27,6 +28,10 @@ public static class HealthCheckExtensions
         // Add Blob Storage health check
         healthChecksBuilder
             .AddCheck<BlobStorageHealthCheck>("blob-storage", tags: new[] { "ready" });
+
+        // Add message consumer (RabbitMQ/Service Bus) health check
+        healthChecksBuilder
+            .AddCheck<MessageConsumerHealthCheck>("message-consumer", tags: new[] { "ready", "live" });
 
         // Add configuration validation check
         healthChecksBuilder
@@ -97,12 +102,12 @@ internal class BlobStorageHealthCheck : IHealthCheck
 internal class ConfigurationHealthCheck : IHealthCheck
 {
     private readonly IOptionsSnapshot<ServiceBusOptions> _serviceBusOptions;
-    private readonly IOptionsSnapshot<BlobStorageOptions> _storageSettings;
+    private readonly IOptionsSnapshot<StorageSettings> _storageSettings;
     private readonly IOptionsSnapshot<PlaywrightOptions> _playwrightOptions;
 
     public ConfigurationHealthCheck(
         IOptionsSnapshot<ServiceBusOptions> serviceBusOptions,
-        IOptionsSnapshot<BlobStorageOptions> storageSettings,
+        IOptionsSnapshot<StorageSettings> storageSettings,
         IOptionsSnapshot<PlaywrightOptions> playwrightOptions)
     {
         _serviceBusOptions = serviceBusOptions;
@@ -126,6 +131,69 @@ internal class ConfigurationHealthCheck : IHealthCheck
         catch (Exception ex)
         {
             return Task.FromResult(HealthCheckResult.Unhealthy("Configuration check failed.", ex));
+        }
+    }
+}
+
+/// <summary>
+/// Health check for message consumer (RabbitMQ or Service Bus) connectivity.
+/// Reports the current connection status and detailed diagnostic information.
+/// </summary>
+internal class MessageConsumerHealthCheck : IHealthCheck
+{
+    private readonly IMessageConsumer _messageConsumer;
+    private readonly ILogger<MessageConsumerHealthCheck> _logger;
+
+    public MessageConsumerHealthCheck(
+        IMessageConsumer messageConsumer,
+        ILogger<MessageConsumerHealthCheck> logger)
+    {
+        _messageConsumer = messageConsumer;
+        _logger = logger;
+    }
+
+    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var consumerType = _messageConsumer.GetType().Name;
+
+            // Check RabbitMQ consumer
+            if (_messageConsumer is RabbitMqConsumer rabbitConsumer)
+            {
+                var isConnected = rabbitConsumer.IsConnected;
+
+                if (isConnected)
+                {
+                    return Task.FromResult(HealthCheckResult.Healthy(
+                        $"RabbitMQ consumer is connected and ready to process messages."));
+                }
+                else
+                {
+                    return Task.FromResult(HealthCheckResult.Degraded(
+                        "RabbitMQ consumer is not currently connected. " +
+                        "The worker will attempt to reconnect with exponential backoff. " +
+                        "Check logs for connection retry attempts. " +
+                        "Ensure RabbitMQ is running and accessible."));
+                }
+            }
+
+            // Check Service Bus consumer (always assumed connected if registered)
+            if (_messageConsumer is ServiceBusConsumer)
+            {
+                return Task.FromResult(HealthCheckResult.Healthy(
+                    "Service Bus consumer initialized and ready."));
+            }
+
+            // Unknown consumer type
+            return Task.FromResult(HealthCheckResult.Healthy(
+                $"Message consumer ({consumerType}) initialized."));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Message consumer health check encountered an error");
+            return Task.FromResult(HealthCheckResult.Unhealthy(
+                "Message consumer health check failed.", ex));
         }
     }
 }

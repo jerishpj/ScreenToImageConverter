@@ -9,7 +9,7 @@ namespace ScreenToImageConverter.Worker.Infrastructure.Notifications;
 /// RabbitMQ implementation of IMessagePublisher for local development testing.
 /// Simulates Azure Service Bus behavior using RabbitMQ.
 /// </summary>
-public class RabbitMqPublisher : IMessagePublisher
+public class RabbitMqPublisher : IMessagePublisher, IDisposable, IAsyncDisposable
 {
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqPublisher> _logger;
@@ -117,6 +117,17 @@ public class RabbitMqPublisher : IMessagePublisher
             _logger.LogError(ex, "❌ Failed to publish message to RabbitMQ");
             throw;
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+
+        _channel?.Dispose();
+        _connection?.Dispose();
+
+        _disposed = true;
+        GC.SuppressFinalize(this);
     }
 
     public async ValueTask DisposeAsync()

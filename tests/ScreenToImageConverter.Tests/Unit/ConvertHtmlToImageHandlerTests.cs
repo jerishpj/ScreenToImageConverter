@@ -25,7 +25,7 @@ public class ConvertHtmlToImageHandlerTests
     private readonly Mock<IBlobStorageService> _mockBlobStorageService;
     private readonly ConvertHtmlToImageHandler _handler;
     private readonly PlaywrightOptions _playwrightOptions;
-    private readonly BlobStorageOptions _blobStorageOptions;
+    private readonly StorageSettings _storageSettings;
 
     public ConvertHtmlToImageHandlerTests()
     {
@@ -95,7 +95,7 @@ public class ConvertHtmlToImageHandlerTests
             BrowserType = "chromium"
         };
 
-        _blobStorageOptions = new BlobStorageOptions
+        _storageSettings = new StorageSettings
         {
             ContainerName = "screenshots",
             SasUrlExpirationMinutes = 60
@@ -106,7 +106,7 @@ public class ConvertHtmlToImageHandlerTests
             _mockBlobStorageService.Object,
             _mockMessagePublisher,
             Options.Create(_playwrightOptions),
-            Options.Create(_blobStorageOptions),
+            Options.Create(_storageSettings),
             _loggerFactory.CreateLogger<ConvertHtmlToImageHandler>());
     }
 
@@ -363,7 +363,7 @@ public class ConvertHtmlToImageHandlerTests
             _mockBlobStorageService.Object,
             _mockMessagePublisher,
             Options.Create(_playwrightOptions),
-            Options.Create(_blobStorageOptions),
+            Options.Create(_storageSettings),
             _loggerFactory.CreateLogger<ConvertHtmlToImageHandler>());
 
         var command = new ConvertHtmlToImageCommand
@@ -396,7 +396,7 @@ public class ConvertHtmlToImageHandlerTests
             failingBlobService.Object,
             _mockMessagePublisher,
             Options.Create(_playwrightOptions),
-            Options.Create(_blobStorageOptions),
+            Options.Create(_storageSettings),
             _loggerFactory.CreateLogger<ConvertHtmlToImageHandler>());
 
         var command = new ConvertHtmlToImageCommand

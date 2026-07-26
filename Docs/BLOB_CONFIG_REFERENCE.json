@@ -1,0 +1,222 @@
+// ============================================================================
+// AZURE BLOB STORAGE CONFIGURATION EXAMPLES
+// ============================================================================
+
+// ===========================================================================
+// OPTION 1: DEVELOPMENT (Using Connection String)
+// ===========================================================================
+// Recommended for local development
+// Authentication: Storage Account Access Key
+// Setup: Get connection string from Azure Portal → Storage Account → Access Keys
+//
+// Steps:
+// 1. Get connection string from Azure Portal
+// 2. Set via user-secrets: 
+//    dotnet user-secrets set "BlobStorage:ConnectionString" "DefaultEndpointsProtocol=..."
+// 3. Use appsettings.Development.json below
+//
+
+{
+  "BlobStorage": {
+    // ✅ Use connection string for development
+    "ConnectionString": "DefaultEndpointsProtocol=https;AccountName=your-account;AccountKey=your-key;EndpointSuffix=core.windows.net",
+
+    // Set to false when using ConnectionString
+    "UseManagedIdentity": false,
+
+    // Container name (will be created if AutoCreateContainer is true)
+    "ContainerName": "screenshots",
+
+    // How long SAS URLs are valid (in minutes)
+    "SasUrlExpirationMinutes": 60,
+
+    // Auto-create container if it doesn't exist
+    "AutoCreateContainer": true
+  }
+}
+
+// ===========================================================================
+// OPTION 2: PRODUCTION (Using Managed Identity)
+// ===========================================================================
+// Recommended for apps running in Azure
+// Authentication: Azure Managed Identity (System-Assigned or User-Assigned)
+// Setup: No connection string needed, relies on Azure RBAC
+//
+// Steps:
+// 1. Create managed identity in Azure
+// 2. Assign "Storage Blob Data Contributor" role to the identity
+// 3. Use configuration below
+// 4. Deploy app with managed identity binding
+//
+
+{
+  "BlobStorage": {
+    // Use account name (NOT the full domain)
+    "AccountName": "your-storage-account",
+
+    // Set to true to use Managed Identity / DefaultAzureCredential
+    "UseManagedIdentity": true,
+
+    // Container name
+    "ContainerName": "screenshots",
+
+    // How long SAS URLs are valid (in minutes)
+    "SasUrlExpirationMinutes": 60,
+
+    // Auto-create container if it doesn't exist
+    "AutoCreateContainer": true
+  }
+}
+
+// ===========================================================================
+// OPTION 3: LOCAL TESTING WITH AZURE STORAGE EMULATOR
+// ===========================================================================
+// For completely offline development
+// Requires: Azure Storage Emulator installed
+// Start emulator before running the app
+//
+
+{
+  "BlobStorage": {
+    "ConnectionString": "UseDevelopmentStorage=true",
+    "UseManagedIdentity": false,
+    "ContainerName": "screenshots",
+    "SasUrlExpirationMinutes": 60,
+    "AutoCreateContainer": true
+  }
+}
+
+// ===========================================================================
+// CONFIGURATION REFERENCE
+// ===========================================================================
+
+/*
+Field: ConnectionString
+Type: string (optional)
+Usage: When UseManagedIdentity = false
+Format: DefaultEndpointsProtocol=https;AccountName=XXXX;AccountKey=YYYY;EndpointSuffix=core.windows.net
+Where to get: Azure Portal → Storage Accounts → Your Account → Access Keys → Connection String (key1)
+Note: Store in user-secrets, NOT in appsettings
+Default: null
+
+Field: AccountName
+Type: string (optional)
+Usage: When UseManagedIdentity = true, OR for connection string format
+Format: Just the account name (e.g., "mystorageaccount", NOT "mystorageaccount.blob.core.windows.net")
+Where to get: Azure Portal → Storage Accounts → Your Account name
+Note: Required when using Managed Identity
+Default: null
+
+Field: ContainerName
+Type: string (required)
+Usage: Name of the blob container to store screenshots
+Format: Lowercase alphanumeric, no spaces or special chars (except hyphens)
+Value: Use "screenshots" (or customize if needed)
+Default: "screenshots"
+
+Field: UseManagedIdentity
+Type: boolean
+Usage: Choose authentication method
+Values:
+  - true: Use Azure Managed Identity (recommended for Azure-hosted apps)
+  - false: Use Connection String (recommended for local development)
+Default: true
+
+Field: SasUrlExpirationMinutes
+Type: integer (must be > 0)
+Usage: How long generated SAS URLs are valid
+Recommended: 60 minutes (1 hour)
+Range: 1 to 1440+ minutes
+Default: 60
+
+Field: AutoCreateContainer
+Type: boolean
+Usage: Automatically create container if it doesn't exist
+Values:
+  - true: Container is created on first app run
+  - false: Container must exist before app starts
+Note: Creating requires "Storage Blob Data Contributor" role
+Default: true
+*/
+
+// ===========================================================================
+// USER-SECRETS SETUP EXAMPLES
+// ===========================================================================
+
+/*
+PowerShell:
+
+# Set connection string (development)
+dotnet user-secrets set "BlobStorage:ConnectionString" "DefaultEndpointsProtocol=https;AccountName=mystorageacct;AccountKey=ABC123==;EndpointSuffix=core.windows.net"
+
+# Set account name (production / managed identity)
+dotnet user-secrets set "BlobStorage:AccountName" "mystorageacct"
+dotnet user-secrets set "BlobStorage:UseManagedIdentity" "true"
+
+# Verify secrets
+dotnet user-secrets list
+
+# Clear all secrets
+dotnet user-secrets clear
+
+bash/zsh:
+
+# Set connection string (development)
+dotnet user-secrets set "BlobStorage:ConnectionString" "DefaultEndpointsProtocol=https;AccountName=mystorageacct;AccountKey=ABC123==;EndpointSuffix=core.windows.net"
+
+# Set account name (production / managed identity)
+dotnet user-secrets set "BlobStorage:AccountName" "mystorageacct"
+dotnet user-secrets set "BlobStorage:UseManagedIdentity" "true"
+
+# Verify secrets
+dotnet user-secrets list
+*/
+
+// ===========================================================================
+// VALIDATION LOGIC
+// ===========================================================================
+
+/*
+The app validates configuration on startup and will throw an exception if:
+
+1. UseManagedIdentity = true AND AccountName is empty/null
+   → Error: "AccountName is required when UseManagedIdentity is true."
+   → Fix: Set AccountName in config or user-secrets
+
+2. UseManagedIdentity = false AND ConnectionString is empty/null
+   → Error: "ConnectionString is required when UseManagedIdentity is false."
+   → Fix: Set ConnectionString in appsettings or user-secrets
+
+3. ContainerName is empty/null
+   → Error: "ContainerName is required."
+   → Fix: Set ContainerName (default is "screenshots")
+
+4. SasUrlExpirationMinutes <= 0
+   → Error: "SasUrlExpirationMinutes must be greater than 0."
+   → Fix: Use positive integer (recommended: 60)
+*/
+
+// ===========================================================================
+// ERROR RECOVERY
+// ===========================================================================
+
+/*
+If app fails to start with configuration errors:
+
+1. Check the error message for exactly what's missing
+2. Look at examples above that match your scenario
+3. Set the missing configuration value
+4. Restart the app
+
+For connection string issues:
+- Regenerate in Azure Portal: Storage Account → Access Keys → Rotate key
+- Copy the FULL connection string (not just the key)
+- Set via user-secrets (not in appsettings files)
+
+For managed identity issues:
+- Verify identity is assigned to the app (App Service → Identity)
+- Verify "Storage Blob Data Contributor" role is assigned
+- Run: az role assignment list --assignee <identity-id>
+- Container must exist or AutoCreateContainer must be true
+*/
+

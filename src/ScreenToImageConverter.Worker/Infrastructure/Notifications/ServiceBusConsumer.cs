@@ -11,8 +11,11 @@ namespace ScreenToImageConverter.Worker.Infrastructure.Notifications;
 /// Implementation of IMessageConsumer using Azure Service Bus.
 /// Handles receiving and deserializing HtmlScreenshotRequest messages from Service Bus topics.
 /// Part of the Notifications infrastructure.
+/// 
+/// Implements both IDisposable and IAsyncDisposable following best practices.
+/// The DI container may call either Dispose() or DisposeAsync() depending on context.
 /// </summary>
-public class ServiceBusConsumer : IMessageConsumer
+public class ServiceBusConsumer : IMessageConsumer, IDisposable
 {
     private readonly NotificationSettings _settings;
     private readonly ILogger<ServiceBusConsumer> _logger;
@@ -197,7 +200,43 @@ public class ServiceBusConsumer : IMessageConsumer
     }
 
     /// <summary>
-    /// Disposes the consumer resources.
+    /// Synchronous dispose for IDisposable.
+    /// Stops processing and disposes resources synchronously (blocking).
+    /// This is used when the DI container disposes the instance synchronously.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+
+        try
+        {
+            if (_processor != null)
+            {
+                // Stop processing synchronously (blocking on async)
+                _processor.StopProcessingAsync().Wait();
+                _processor.DisposeAsync().AsTask().Wait();
+            }
+
+            if (_serviceBusClient != null)
+            {
+                _serviceBusClient.DisposeAsync().AsTask().Wait();
+            }
+
+            _disposed = true;
+            _logger.LogInformation("✅ ServiceBusConsumer disposed (sync)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Error disposing ServiceBusConsumer (sync)");
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Asynchronous dispose for IAsyncDisposable.
+    /// Provides proper async cleanup without blocking.
+    /// Preferred method when async context is available.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -220,11 +259,13 @@ public class ServiceBusConsumer : IMessageConsumer
             }
 
             _disposed = true;
-            _logger.LogInformation("✅ ServiceBusConsumer disposed");
+            _logger.LogInformation("✅ ServiceBusConsumer disposed (async)");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Error disposing ServiceBusConsumer");
+            _logger.LogError(ex, "❌ Error disposing ServiceBusConsumer (async)");
         }
+
+        GC.SuppressFinalize(this);
     }
 }

@@ -3,7 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using ScreenToImageConverter.Worker.AppSettings;
 using ScreenToImageConverter.Worker.Features.ConvertHtmlToImage;
+using ScreenToImageConverter.Worker.Infrastructure.Diagnostics;
 using ScreenToImageConverter.Worker.Infrastructure.Notifications;
+using ScreenToImageConverter.Worker.Infrastructure.Resilience;
 using ScreenToImageConverter.Worker.Infrastructure.Screenshots;
 using ScreenToImageConverter.Worker.Infrastructure.Storage;
 
@@ -77,7 +79,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ConvertHtmlToImageHandler>();
 
         // Register infrastructure services
-        services.AddInfrastructureNotifications();
+        // Note: IMessageConsumer and IMessagePublisher are already registered in AddApplicationConfiguration
+        // based on the environment, so we don't need to call AddInfrastructureNotifications here
         services.AddInfrastructureStorage();
 
         // Register screenshot provider
@@ -87,8 +90,23 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers notification (Service Bus) infrastructure components.
+    /// Registers resilience and diagnostics services for the worker.
+    /// Includes startup diagnostics and connection policies.
     /// </summary>
+    public static IServiceCollection AddApplicationResilience(
+        this IServiceCollection services)
+    {
+        services.AddScoped<IStartupDiagnostics, StartupDiagnostics>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers notification (Service Bus) infrastructure components.
+    /// This method is deprecated and kept for backward compatibility.
+    /// Use AddApplicationConfiguration instead for environment-aware registration.
+    /// </summary>
+    [Obsolete("Use AddApplicationConfiguration for environment-aware messaging setup")]
     public static IServiceCollection AddInfrastructureNotifications(
         this IServiceCollection services)
     {
@@ -105,6 +123,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services)
     {
         services.AddScoped<IBlobStorageService, BlobStorageService>();
+        services.AddScoped<BlobStorageDiagnostics>();
 
         return services;
     }
