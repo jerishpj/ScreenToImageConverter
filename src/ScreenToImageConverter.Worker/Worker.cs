@@ -27,6 +27,16 @@ public class Worker : BackgroundService
     private readonly IHostApplicationLifetime _hostApplicationLifetime;
     private readonly IServiceProvider _serviceProvider;
 
+    /// <summary>
+    /// Constants for message consumer retry logic.
+    /// </summary>
+    private static class RetryConstants
+    {
+        public const int MaxRetryAttempts = 3;
+        public const int InitialDelaySeconds = 2;
+        public const int MaxDelaySeconds = 30;
+    }
+
     public Worker(
         ILogger<Worker> logger,
         IHostApplicationLifetime hostApplicationLifetime,
@@ -101,13 +111,14 @@ public class Worker : BackgroundService
     /// </summary>
     private void RegisterMessageHandler(IMessageConsumer messageConsumer)
     {
-        if (messageConsumer is ServiceBusConsumer serviceBusConsumer)
+        switch (messageConsumer)
         {
-            serviceBusConsumer.RegisterMessageHandler(ProcessMessageAsync);
-        }
-        else if (messageConsumer is RabbitMqConsumer rabbitMqConsumer)
-        {
-            rabbitMqConsumer.RegisterMessageHandler(ProcessMessageAsync);
+            case ServiceBusConsumer serviceBusConsumer:
+                serviceBusConsumer.RegisterMessageHandler(ProcessMessageAsync);
+                break;
+            case RabbitMqConsumer rabbitMqConsumer:
+                rabbitMqConsumer.RegisterMessageHandler(ProcessMessageAsync);
+                break;
         }
     }
 
@@ -121,11 +132,10 @@ public class Worker : BackgroundService
         ILogger<Worker> logger,
         CancellationToken stoppingToken)
     {
-        const int maxRetryAttempts = 3;
         int retryCount = 0;
-        TimeSpan retryDelay = TimeSpan.FromSeconds(2);
+        TimeSpan retryDelay = TimeSpan.FromSeconds(RetryConstants.InitialDelaySeconds);
 
-        while (retryCount < maxRetryAttempts && !stoppingToken.IsCancellationRequested)
+        while (retryCount < RetryConstants.MaxRetryAttempts && !stoppingToken.IsCancellationRequested)
         {
             try
             {
@@ -134,65 +144,18 @@ public class Worker : BackgroundService
             }
             catch (RabbitMQ.Client.Exceptions.BrokerUnreachableException ex)
             {
-                retryCount++;
-                logger.LogWarning(
-                    ex,
-                    "⚠️ RabbitMQ connection attempt {RetryCount}/{MaxRetries} failed. " +
-                    "Broker unreachable. Retrying in {DelaySeconds}s...",
-                    retryCount,
-                    maxRetryAttempts,
-                    (int)retryDelay.TotalSeconds);
-
-                if (retryCount < maxRetryAttempts)
-                {
-                    await Task.Delay(retryDelay, stoppingToken);
-                    retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 30)); // Cap at 30s
-                }
-                else
-                {
-                    logger.LogError(
-                        "❌ Max retry attempts ({MaxRetries}) reached for RabbitMQ connection. " +
-                        "Worker will continue running in degraded mode. " +
-                        "Please ensure RabbitMQ is running: {Host}:{Port}. " +
-                        "The worker will remain operational and retry connection when RabbitMQ becomes available.",
-                        maxRetryAttempts,
-                        "localhost",
-                        5672); // These values should come from RabbitMqOptions
-                }
+                await HandleBrokerUnreachableExceptionAsync(ex, ++retryCount, retryDelay, logger, stoppingToken);
+                retryDelay = UpdateRetryDelay(retryDelay);
             }
             catch (IOException ex)
             {
-                retryCount++;
-                logger.LogWarning(
-                    ex,
-                    "⚠️ Network error during RabbitMQ connection attempt {RetryCount}/{MaxRetries}. " +
-                    "Retrying in {DelaySeconds}s...",
-                    retryCount,
-                    maxRetryAttempts,
-                    (int)retryDelay.TotalSeconds);
-
-                if (retryCount < maxRetryAttempts)
-                {
-                    await Task.Delay(retryDelay, stoppingToken);
-                    retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 30));
-                }
+                await HandleIOExceptionAsync(ex, ++retryCount, retryDelay, logger, stoppingToken);
+                retryDelay = UpdateRetryDelay(retryDelay);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
-                retryCount++;
-                logger.LogWarning(
-                    ex,
-                    "⚠️ Error during message consumer startup attempt {RetryCount}/{MaxRetries}: {ErrorMessage}. " +
-                    "Retrying...",
-                    retryCount,
-                    maxRetryAttempts,
-                    ex.Message);
-
-                if (retryCount < maxRetryAttempts)
-                {
-                    await Task.Delay(retryDelay, stoppingToken);
-                    retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 30));
-                }
+                await HandleGeneralExceptionAsync(ex, ++retryCount, retryDelay, logger, stoppingToken);
+                retryDelay = UpdateRetryDelay(retryDelay);
             }
         }
 
@@ -200,6 +163,95 @@ public class Worker : BackgroundService
             "📊 Message consumer startup completed after {AttemptCount} attempts. " +
             "Worker service is operational and will process messages if consumer is connected.",
             retryCount);
+    }
+
+    /// <summary>
+    /// Handles BrokerUnreachableException with appropriate logging and delays.
+    /// </summary>
+    private async Task HandleBrokerUnreachableExceptionAsync(
+        RabbitMQ.Client.Exceptions.BrokerUnreachableException ex,
+        int retryCount,
+        TimeSpan retryDelay,
+        ILogger<Worker> logger,
+        CancellationToken stoppingToken)
+    {
+        logger.LogWarning(
+            ex,
+            "⚠️ RabbitMQ connection attempt {RetryCount}/{MaxRetries} failed. " +
+            "Broker unreachable. Retrying in {DelaySeconds}s...",
+            retryCount,
+            RetryConstants.MaxRetryAttempts,
+            (int)retryDelay.TotalSeconds);
+
+        if (retryCount < RetryConstants.MaxRetryAttempts)
+        {
+            await Task.Delay(retryDelay, stoppingToken);
+        }
+        else
+        {
+            logger.LogError(
+                "❌ Max retry attempts ({MaxRetries}) reached for RabbitMQ connection. " +
+                "Worker will continue running in degraded mode. " +
+                "Please ensure RabbitMQ is running and accessible.",
+                RetryConstants.MaxRetryAttempts);
+        }
+    }
+
+    /// <summary>
+    /// Handles IOException with appropriate logging and delays.
+    /// </summary>
+    private async Task HandleIOExceptionAsync(
+        IOException ex,
+        int retryCount,
+        TimeSpan retryDelay,
+        ILogger<Worker> logger,
+        CancellationToken stoppingToken)
+    {
+        logger.LogWarning(
+            ex,
+            "⚠️ Network error during RabbitMQ connection attempt {RetryCount}/{MaxRetries}. " +
+            "Retrying in {DelaySeconds}s...",
+            retryCount,
+            RetryConstants.MaxRetryAttempts,
+            (int)retryDelay.TotalSeconds);
+
+        if (retryCount < RetryConstants.MaxRetryAttempts)
+        {
+            await Task.Delay(retryDelay, stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Handles general exceptions with appropriate logging and delays.
+    /// </summary>
+    private async Task HandleGeneralExceptionAsync(
+        Exception ex,
+        int retryCount,
+        TimeSpan retryDelay,
+        ILogger<Worker> logger,
+        CancellationToken stoppingToken)
+    {
+        logger.LogWarning(
+            ex,
+            "⚠️ Error during message consumer startup attempt {RetryCount}/{MaxRetries}: {ErrorMessage}. " +
+            "Retrying...",
+            retryCount,
+            RetryConstants.MaxRetryAttempts,
+            ex.Message);
+
+        if (retryCount < RetryConstants.MaxRetryAttempts)
+        {
+            await Task.Delay(retryDelay, stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Updates the retry delay with exponential backoff, capped at max delay.
+    /// </summary>
+    private static TimeSpan UpdateRetryDelay(TimeSpan currentDelay)
+    {
+        var newDelaySeconds = Math.Min(currentDelay.TotalSeconds * 2, RetryConstants.MaxDelaySeconds);
+        return TimeSpan.FromSeconds(newDelaySeconds);
     }
 
     /// <summary>

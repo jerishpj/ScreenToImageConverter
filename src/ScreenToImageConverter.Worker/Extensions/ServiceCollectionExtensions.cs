@@ -24,49 +24,78 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        _ = configuration ?? throw new ArgumentNullException(nameof(configuration));
 
-        // Register and validate Notification (ServiceBus) settings
-        services.Configure<NotificationSettings>(configuration.GetSection(NotificationSettings.SectionName));
-        var notificationSettings = configuration.GetSection(NotificationSettings.SectionName).Get<NotificationSettings>();
+        RegisterAndValidateNotificationSettings(services, configuration);
+        RegisterAndValidateMessagingProvider(services, configuration);
+        RegisterAndValidateStorageSettings(services, configuration);
+        RegisterAndValidatePlaywrightOptions(services, configuration);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers and validates notification settings.
+    /// </summary>
+    private static void RegisterAndValidateNotificationSettings(IServiceCollection services, IConfiguration configuration)
+    {
+        var section = configuration.GetSection(NotificationSettings.SectionName);
+        services.Configure<NotificationSettings>(section);
+
+        var notificationSettings = section.Get<NotificationSettings>();
         ValidateOptions(notificationSettings, nameof(NotificationSettings));
+    }
 
-        // Add RabbitMQ configuration
-        services.Configure<RabbitMqOptions>(
-            services.BuildServiceProvider()
-                .GetRequiredService<IConfiguration>()
-                .GetSection("RabbitMq"));
+    /// <summary>
+    /// Registers appropriate messaging provider based on environment (RabbitMQ for dev, Service Bus for prod).
+    /// </summary>
+    private static void RegisterAndValidateMessagingProvider(IServiceCollection services, IConfiguration configuration)
+    {
+        // Register RabbitMQ options first
+        var rabbitMqSection = configuration.GetSection("RabbitMq");
+        services.Configure<RabbitMqOptions>(rabbitMqSection);
 
-        // Validate RabbitMQ options if development environment
-        var serviceProvider = services.BuildServiceProvider();
-        var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
+        // Build temporary provider to check environment
+        var tempProvider = services.BuildServiceProvider();
+        var environment = tempProvider.GetRequiredService<IHostEnvironment>();
 
         if (environment.IsDevelopment())
         {
-            var rabbitMqOptions = configuration.GetSection("RabbitMq").Get<RabbitMqOptions>();
+            var rabbitMqOptions = rabbitMqSection.Get<RabbitMqOptions>();
             ValidateOptions(rabbitMqOptions, nameof(RabbitMqOptions));
 
-            // Use RabbitMQ for local development (free, no costs)
             services.AddScoped<IMessageConsumer, RabbitMqConsumer>();
             services.AddScoped<IMessagePublisher, RabbitMqPublisher>();
         }
         else
         {
-            // Use Azure Service Bus for production
             services.AddScoped<IMessageConsumer, ServiceBusConsumer>();
             services.AddScoped<IMessagePublisher, ServiceBusPublisher>();
         }
+    }
 
-        // Register and validate Storage (BlobStorage) settings
-        services.Configure<StorageSettings>(configuration.GetSection(StorageSettings.SectionName));
-        var storageSettings = configuration.GetSection(StorageSettings.SectionName).Get<StorageSettings>();
+    /// <summary>
+    /// Registers and validates storage settings.
+    /// </summary>
+    private static void RegisterAndValidateStorageSettings(IServiceCollection services, IConfiguration configuration)
+    {
+        var section = configuration.GetSection(StorageSettings.SectionName);
+        services.Configure<StorageSettings>(section);
+
+        var storageSettings = section.Get<StorageSettings>();
         ValidateOptions(storageSettings, nameof(StorageSettings));
+    }
 
-        // Register and validate PlaywrightOptions
-        services.Configure<PlaywrightOptions>(configuration.GetSection(PlaywrightOptions.SectionName));
-        var playwrightOptions = configuration.GetSection(PlaywrightOptions.SectionName).Get<PlaywrightOptions>();
+    /// <summary>
+    /// Registers and validates Playwright options.
+    /// </summary>
+    private static void RegisterAndValidatePlaywrightOptions(IServiceCollection services, IConfiguration configuration)
+    {
+        var section = configuration.GetSection(PlaywrightOptions.SectionName);
+        services.Configure<PlaywrightOptions>(section);
+
+        var playwrightOptions = section.Get<PlaywrightOptions>();
         ValidateOptions(playwrightOptions, nameof(PlaywrightOptions));
-
-        return services;
     }
 
     /// <summary>
@@ -103,10 +132,7 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Registers notification (Service Bus) infrastructure components.
-    /// This method is deprecated and kept for backward compatibility.
-    /// Use AddApplicationConfiguration instead for environment-aware registration.
     /// </summary>
-    [Obsolete("Use AddApplicationConfiguration for environment-aware messaging setup")]
     public static IServiceCollection AddInfrastructureNotifications(
         this IServiceCollection services)
     {

@@ -1,7 +1,7 @@
-﻿using Microsoft.Extensions.Options;
+﻿using System.Text.Json;
+using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using ScreenToImageConverter.Worker.AppSettings;
-using System.Text.Json;
 
 namespace ScreenToImageConverter.Worker.Infrastructure.Notifications;
 

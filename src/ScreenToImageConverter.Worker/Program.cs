@@ -9,15 +9,7 @@ try
     var builder = Host.CreateApplicationBuilder(args);
 
     // Configure Serilog for structured logging with enhanced diagnostics
-    Log.Logger = new LoggerConfiguration()
-        .MinimumLevel.Information()
-        .Enrich.FromLogContext()
-        .Enrich.WithEnvironmentName()
-        .Enrich.WithProperty("Application", "HtmlToImageWorker")
-        .WriteTo.Console()
-        .CreateLogger();
-
-    builder.Services.AddSerilog();
+    ConfigureSerilog(builder);
 
     // Add Application Insights telemetry
     builder.Services.AddApplicationInsightsTelemetryWorkerService();
@@ -46,10 +38,50 @@ try
         host.Services.GetRequiredService<IHostEnvironment>().EnvironmentName);
 
     // Run startup diagnostics
+    await RunStartupDiagnosticsAsync(host, logger);
+
+    // Initialize Playwright provider
+    logger.LogInformation("💾 Initializing Playwright screenshot provider...");
+    await host.Services.InitializePlaywrightAsync(CancellationToken.None);
+    logger.LogInformation("✅ Playwright screenshot provider initialized");
+
+    logger.LogInformation("📊 Starting worker service...");
+    await host.RunAsync();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "💥 Application terminated unexpectedly. Error: {ErrorMessage}", ex.Message);
+    Environment.ExitCode = 1;
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
+}
+
+/// <summary>
+/// Configures Serilog for structured logging with enhanced diagnostics.
+/// </summary>
+static void ConfigureSerilog(HostApplicationBuilder builder)
+{
+    Log.Logger = new LoggerConfiguration()
+        .MinimumLevel.Information()
+        .Enrich.FromLogContext()
+        .Enrich.WithEnvironmentName()
+        .Enrich.WithProperty("Application", "HtmlToImageWorker")
+        .WriteTo.Console()
+        .CreateLogger();
+
+    builder.Services.AddSerilog();
+}
+
+/// <summary>
+/// Runs startup diagnostics to validate application dependencies.
+/// </summary>
+static async Task RunStartupDiagnosticsAsync(IHost host, ILogger<Program> logger)
+{
     logger.LogInformation("🔍 Running startup diagnostics...");
     try
     {
-        // Create a scope to resolve scoped services
         using var scope = host.Services.CreateScope();
         var diagnostics = scope.ServiceProvider.GetRequiredService<IStartupDiagnostics>();
         var diagnosticResult = await diagnostics.ValidateAsync(CancellationToken.None);
@@ -69,21 +101,4 @@ try
     {
         logger.LogWarning(ex, "⚠️ Startup diagnostics encountered an issue, but continuing startup");
     }
-
-    // Initialize Playwright provider
-    logger.LogInformation("💾 Initializing Playwright screenshot provider...");
-    await host.Services.InitializePlaywrightAsync(CancellationToken.None);
-    logger.LogInformation("✅ Playwright screenshot provider initialized");
-
-    logger.LogInformation("📊 Starting worker service...");
-    await host.RunAsync();
-}
-catch (Exception ex)
-{
-    Log.Fatal(ex, "💥 Application terminated unexpectedly. Error: {ErrorMessage}", ex.Message);
-    Environment.ExitCode = 1;
-}
-finally
-{
-    await Log.CloseAndFlushAsync();
 }

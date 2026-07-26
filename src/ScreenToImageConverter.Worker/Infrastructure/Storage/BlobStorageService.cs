@@ -14,6 +14,9 @@ namespace ScreenToImageConverter.Worker.Infrastructure.Storage;
 /// </summary>
 public class BlobStorageService : IBlobStorageService
 {
+    private const int KilobyteDivisor = 1024;
+    private const string BlobSasPermissions = "racwd"; // Read, Add, Create, Write, Delete
+
     private readonly StorageSettings _settings;
     private readonly ILogger<BlobStorageService> _logger;
     private BlobContainerClient? _containerClient;
@@ -39,14 +42,7 @@ public class BlobStorageService : IBlobStorageService
         string? requestId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(containerName))
-            throw new ArgumentException("Container name cannot be null or empty", nameof(containerName));
-
-        if (string.IsNullOrWhiteSpace(blobName))
-            throw new ArgumentException("Blob name cannot be null or empty", nameof(blobName));
-
-        if (data == null || data.Length == 0)
-            throw new ArgumentException("Data cannot be null or empty", nameof(data));
+        ValidateUploadParameters(containerName, blobName, data);
 
         try
         {
@@ -54,16 +50,12 @@ public class BlobStorageService : IBlobStorageService
                 "Uploading blob to container '{Container}' with name '{BlobName}' ({SizeKb} KB) [CorrelationId: {CorrelationId}]",
                 containerName,
                 blobName,
-                data.Length / 1024,
+                data.Length / KilobyteDivisor,
                 correlationId ?? "N/A");
 
-            // Get or create container client
             var containerClient = await GetOrCreateContainerClientAsync(containerName, cancellationToken);
-
-            // Get blob client
             var blobClient = containerClient.GetBlobClient(blobName);
 
-            // Upload blob with overwrite
             var uploadOptions = new BlobUploadOptions
             {
                 HttpHeaders = new BlobHttpHeaders
@@ -82,41 +74,7 @@ public class BlobStorageService : IBlobStorageService
                 blobName,
                 correlationId ?? "N/A");
 
-            // Generate SAS URL
-            string? sasUrl = null;
-            DateTime? sasUrlExpiresAt = null;
-
-            try
-            {
-                var sasResult = await GenerateSasUrlAsync(containerName, blobName, _settings.SasUrlExpirationMinutes, cancellationToken);
-                sasUrl = sasResult.SasUrl;
-                sasUrlExpiresAt = sasResult.SasUrlExpiresAt;
-
-                _logger.LogInformation(
-                    "✅ SAS URL generated with {Minutes} minute expiration [CorrelationId: {CorrelationId}]",
-                    _settings.SasUrlExpirationMinutes,
-                    correlationId ?? "N/A");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "⚠️ Could not generate SAS URL [CorrelationId: {CorrelationId}]",
-                    correlationId ?? "N/A");
-            }
-
-            // Create and return the result
-            var result = BlobUploadResult.Create(
-                containerName,
-                blobName,
-                blobClient.Uri.AbsoluteUri,
-                data.Length,
-                correlationId,
-                requestId,
-                sasUrl,
-                sasUrlExpiresAt);
-
-            return result;
+            return await CreateUploadResultAsync(containerName, blobName, blobClient, data, correlationId, requestId, cancellationToken);
         }
         catch (Azure.RequestFailedException ex) when (ex.Status == 409)
         {
@@ -144,14 +102,7 @@ public class BlobStorageService : IBlobStorageService
         int expirationMinutes = 60,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(containerName))
-            throw new ArgumentException("Container name cannot be null or empty", nameof(containerName));
-
-        if (string.IsNullOrWhiteSpace(blobName))
-            throw new ArgumentException("Blob name cannot be null or empty", nameof(blobName));
-
-        if (expirationMinutes <= 0)
-            throw new ArgumentException("Expiration minutes must be greater than 0", nameof(expirationMinutes));
+        ValidateSasUrlParameters(containerName, blobName, expirationMinutes);
 
         try
         {
@@ -178,7 +129,6 @@ public class BlobStorageService : IBlobStorageService
             if (_settings.UseManagedIdentity)
             {
                 _logger.LogWarning("SAS URL generation with Managed Identity not fully supported");
-                // Return blob URI without SAS for now
                 return new BlobSasUrlResult
                 {
                     SasUrl = blobClient.Uri.AbsoluteUri,
@@ -188,7 +138,7 @@ public class BlobStorageService : IBlobStorageService
 
             // Generate SAS for connection string
             var sasBuilder = new BlobSasBuilder(
-                BlobContainerSasPermissions.Parse<BlobContainerSasPermissions>("racwd"),
+                BlobContainerSasPermissions.Parse<BlobContainerSasPermissions>(BlobSasPermissions),
                 expiresAt);
 
             var sasUrl = blobClient.GenerateSasUri(sasBuilder)?.AbsoluteUri;
@@ -404,6 +354,81 @@ public class BlobStorageService : IBlobStorageService
         }
 
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Validates upload parameters.
+    /// </summary>
+    private static void ValidateUploadParameters(string containerName, string blobName, byte[] data)
+    {
+        if (string.IsNullOrWhiteSpace(containerName))
+            throw new ArgumentException("Container name cannot be null or empty", nameof(containerName));
+
+        if (string.IsNullOrWhiteSpace(blobName))
+            throw new ArgumentException("Blob name cannot be null or empty", nameof(blobName));
+
+        if (data == null || data.Length == 0)
+            throw new ArgumentException("Data cannot be null or empty", nameof(data));
+    }
+
+    /// <summary>
+    /// Validates SAS URL generation parameters.
+    /// </summary>
+    private static void ValidateSasUrlParameters(string containerName, string blobName, int expirationMinutes)
+    {
+        if (string.IsNullOrWhiteSpace(containerName))
+            throw new ArgumentException("Container name cannot be null or empty", nameof(containerName));
+
+        if (string.IsNullOrWhiteSpace(blobName))
+            throw new ArgumentException("Blob name cannot be null or empty", nameof(blobName));
+
+        if (expirationMinutes <= 0)
+            throw new ArgumentException("Expiration minutes must be greater than 0", nameof(expirationMinutes));
+    }
+
+    /// <summary>
+    /// Creates the upload result with SAS URL generation attempt.
+    /// </summary>
+    private async Task<BlobUploadResult> CreateUploadResultAsync(
+        string containerName,
+        string blobName,
+        BlobClient blobClient,
+        byte[] data,
+        string? correlationId,
+        string? requestId,
+        CancellationToken cancellationToken)
+    {
+        string? sasUrl = null;
+        DateTime? sasUrlExpiresAt = null;
+
+        try
+        {
+            var sasResult = await GenerateSasUrlAsync(containerName, blobName, _settings.SasUrlExpirationMinutes, cancellationToken);
+            sasUrl = sasResult.SasUrl;
+            sasUrlExpiresAt = sasResult.SasUrlExpiresAt;
+
+            _logger.LogInformation(
+                "✅ SAS URL generated with {Minutes} minute expiration [CorrelationId: {CorrelationId}]",
+                _settings.SasUrlExpirationMinutes,
+                correlationId ?? "N/A");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "⚠️ Could not generate SAS URL [CorrelationId: {CorrelationId}]",
+                correlationId ?? "N/A");
+        }
+
+        return BlobUploadResult.Create(
+            containerName,
+            blobName,
+            blobClient.Uri.AbsoluteUri,
+            data.Length,
+            correlationId,
+            requestId,
+            sasUrl,
+            sasUrlExpiresAt);
     }
 }
 

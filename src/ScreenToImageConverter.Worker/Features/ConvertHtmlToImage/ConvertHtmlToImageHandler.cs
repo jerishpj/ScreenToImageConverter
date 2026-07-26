@@ -60,110 +60,7 @@ public class ConvertHtmlToImageHandler
                 command.Url);
 
             // Step 1: Validate the command
-            _logger.LogInformation(
-                "📋 Step 1/3: Validating request [CorrelationId: {CorrelationId}]",
-                correlationId);
-
-            var validationErrors = HtmlRequestValidator.Validate(command);
-            if (validationErrors.Any())
-            {
-                var errorMessage = $"Validation errors: {string.Join("; ", validationErrors)}";
-                _logger.LogWarning(
-                    "❌ Validation failed: {Errors} [CorrelationId: {CorrelationId}]",
-                    errorMessage,
-                    correlationId);
-
-                return ImageMetadataResponse.CreateFailure(
-                    command.RequestId,
-                    command.Url,
-                    errorMessage,
-                    correlationId,
-                    command.SourceId);
-            }
-
-            // Step 2: Capture screenshot
-            _logger.LogInformation(
-                "📸 Step 2/3: Capturing screenshot [CorrelationId: {CorrelationId}]",
-                correlationId);
-
-            int viewportWidth = command.ViewportWidth ?? _playwrightOptions.DefaultViewportWidth;
-            int viewportHeight = command.ViewportHeight ?? _playwrightOptions.DefaultViewportHeight;
-            int timeoutMs = command.TimeoutMs ?? _playwrightOptions.DefaultTimeoutMs;
-
-            byte[] imageData = await _screenshotProvider.CaptureScreenshotAsync(
-                command.Url,
-                viewportWidth,
-                viewportHeight,
-                timeoutMs,
-                cancellationToken);
-
-            _logger.LogInformation(
-                "✅ Screenshot captured: {SizeKb} KB [CorrelationId: {CorrelationId}]",
-                imageData.Length / 1024,
-                correlationId);
-
-            // Step 2.5: Save locally for verification
-            _logger.LogInformation(
-                "💾 Step 2.5/3: Saving image locally for verification [CorrelationId: {CorrelationId}]",
-                correlationId);
-
-            var localFilePath = await SaveImageLocallyAsync(
-                imageData,
-                command.RequestId,
-                correlationId,
-                cancellationToken);
-
-            _logger.LogInformation(
-                "✅ Image saved locally: {LocalPath} [CorrelationId: {CorrelationId}]",
-                localFilePath,
-                correlationId);
-
-            // Step 3: Upload to blob storage
-            _logger.LogInformation(
-                "☁️ Step 3/3: Uploading to blob storage [CorrelationId: {CorrelationId}]",
-                correlationId);
-
-            var blobName = GenerateBlobName(command.RequestId);
-            var uploadResult = await _blobStorageService.UploadAsync(
-                _storageSettings.ContainerName,
-                blobName,
-                imageData,
-                "image/png",
-                correlationId,
-                command.RequestId,
-                cancellationToken);
-
-            _logger.LogInformation(
-                "✅ Image uploaded to blob storage [BlobUri: {BlobUri}, CorrelationId: {CorrelationId}]",
-                uploadResult.BlobUri,
-                correlationId);
-
-            var processingDuration = (long)(DateTime.UtcNow - startTime).TotalMilliseconds;
-
-            // Build success response
-            var response = ImageMetadataResponse.CreateSuccess(
-                command.RequestId,
-                command.Url,
-                blobName,
-                uploadResult.ContainerName,
-                uploadResult.BlobUri,
-                uploadResult.SasUrl,
-                uploadResult.SasUrlExpiresAt,
-                imageData.Length,
-                correlationId,
-                command.SourceId,
-                processingDuration,
-                Environment.MachineName);
-
-            _logger.LogInformation(
-                "🎉 HTML to image conversion completed successfully [RequestId: {RequestId}, Duration: {DurationMs}ms, CorrelationId: {CorrelationId}]",
-                command.RequestId,
-                processingDuration,
-                correlationId);
-
-            // Publish completion event (fire and forget for async notification)
-            _ = PublishCompletionEventAsync(response, correlationId, cancellationToken);
-
+            var response = await ValidateAndProcessCommandAsync(command, correlationId, startTime, cancellationToken);
             return response;
         }
         catch (Exception ex)
@@ -185,11 +82,160 @@ public class ConvertHtmlToImageHandler
                 command.SourceId,
                 processingDuration);
 
-            // Attempt to publish failure event
+            // Attempt to publish failure event (fire-and-forget)
             _ = PublishCompletionEventAsync(failureResponse, correlationId, cancellationToken);
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// Validates the command and processes it through the conversion pipeline.
+    /// </summary>
+    private async Task<ImageMetadataResponse> ValidateAndProcessCommandAsync(
+        ConvertHtmlToImageCommand command,
+        string correlationId,
+        DateTime startTime,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "📋 Step 1/3: Validating request [CorrelationId: {CorrelationId}]",
+            correlationId);
+
+        var validationErrors = HtmlRequestValidator.Validate(command);
+        if (validationErrors.Any())
+        {
+            var errorMessage = $"Validation errors: {string.Join("; ", validationErrors)}";
+            _logger.LogWarning(
+                "❌ Validation failed: {Errors} [CorrelationId: {CorrelationId}]",
+                errorMessage,
+                correlationId);
+
+            return ImageMetadataResponse.CreateFailure(
+                command.RequestId,
+                command.Url,
+                errorMessage,
+                correlationId,
+                command.SourceId);
+        }
+
+        // Step 2: Capture screenshot and upload
+        return await CaptureAndUploadScreenshotAsync(command, correlationId, startTime, cancellationToken);
+    }
+
+    /// <summary>
+    /// Captures the screenshot and uploads it to blob storage.
+    /// </summary>
+    private async Task<ImageMetadataResponse> CaptureAndUploadScreenshotAsync(
+        ConvertHtmlToImageCommand command,
+        string correlationId,
+        DateTime startTime,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "📸 Step 2/3: Capturing screenshot [CorrelationId: {CorrelationId}]",
+            correlationId);
+
+        int viewportWidth = command.ViewportWidth ?? _playwrightOptions.DefaultViewportWidth;
+        int viewportHeight = command.ViewportHeight ?? _playwrightOptions.DefaultViewportHeight;
+        int timeoutMs = command.TimeoutMs ?? _playwrightOptions.DefaultTimeoutMs;
+
+        byte[] imageData = await _screenshotProvider.CaptureScreenshotAsync(
+            command.Url,
+            viewportWidth,
+            viewportHeight,
+            timeoutMs,
+            cancellationToken);
+
+        _logger.LogInformation(
+            "✅ Screenshot captured: {SizeKb} KB [CorrelationId: {CorrelationId}]",
+            imageData.Length / 1024,
+            correlationId);
+
+        // Step 2.5: Save locally for verification (optional)
+        await SaveImageLocallyIfEnabledAsync(imageData, command.RequestId, correlationId, cancellationToken);
+
+        // Step 3: Upload to blob storage
+        return await UploadAndPublishAsync(command, imageData, correlationId, startTime, cancellationToken);
+    }
+
+    /// <summary>
+    /// Saves image locally if needed for verification purposes.
+    /// </summary>
+    private async Task SaveImageLocallyIfEnabledAsync(
+        byte[] imageData,
+        string requestId,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "💾 Step 2.5/3: Saving image locally for verification [CorrelationId: {CorrelationId}]",
+            correlationId);
+
+        var localFilePath = await SaveImageLocallyAsync(imageData, requestId, correlationId, cancellationToken);
+
+        _logger.LogInformation(
+            "✅ Image saved locally: {LocalPath} [CorrelationId: {CorrelationId}]",
+            localFilePath,
+            correlationId);
+    }
+
+    /// <summary>
+    /// Uploads the image to blob storage and publishes completion event.
+    /// </summary>
+    private async Task<ImageMetadataResponse> UploadAndPublishAsync(
+        ConvertHtmlToImageCommand command,
+        byte[] imageData,
+        string correlationId,
+        DateTime startTime,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "☁️ Step 3/3: Uploading to blob storage [CorrelationId: {CorrelationId}]",
+            correlationId);
+
+        var blobName = GenerateBlobName(command.RequestId);
+        var uploadResult = await _blobStorageService.UploadAsync(
+            _storageSettings.ContainerName,
+            blobName,
+            imageData,
+            "image/png",
+            correlationId,
+            command.RequestId,
+            cancellationToken);
+
+        _logger.LogInformation(
+            "✅ Image uploaded to blob storage [BlobUri: {BlobUri}, CorrelationId: {CorrelationId}]",
+            uploadResult.BlobUri,
+            correlationId);
+
+        var processingDuration = (long)(DateTime.UtcNow - startTime).TotalMilliseconds;
+
+        // Build success response
+        var response = ImageMetadataResponse.CreateSuccess(
+            command.RequestId,
+            command.Url,
+            blobName,
+            uploadResult.ContainerName,
+            uploadResult.BlobUri,
+            uploadResult.SasUrl,
+            uploadResult.SasUrlExpiresAt,
+            imageData.Length,
+            correlationId,
+            command.SourceId,
+            processingDuration,
+            Environment.MachineName);
+
+        _logger.LogInformation(
+            "🎉 HTML to image conversion completed successfully [RequestId: {RequestId}, Duration: {DurationMs}ms, CorrelationId: {CorrelationId}]",
+            command.RequestId,
+            processingDuration,
+            correlationId);
+
+        // Publish completion event (fire-and-forget)
+        _ = PublishCompletionEventAsync(response, correlationId, cancellationToken);
+
+        return response;
     }
 
     /// <summary>

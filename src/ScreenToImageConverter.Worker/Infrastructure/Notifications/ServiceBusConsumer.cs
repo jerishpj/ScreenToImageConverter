@@ -3,7 +3,6 @@ using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using ScreenToImageConverter.Worker.Infrastructure.Screenshots;
 
 namespace ScreenToImageConverter.Worker.Infrastructure.Notifications;
 
