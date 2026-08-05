@@ -1,0 +1,123 @@
+version: '3.8'
+
+# Docker Compose configuration for local development and testing
+# Includes: Worker Service, RabbitMQ (message broker), Azurite (blob storage emulator)
+
+services:
+  # RabbitMQ - Message Broker for HTML screenshot requests
+  rabbitmq:
+    image: rabbitmq:3.14-management-alpine
+    container_name: screentoimageconverter-rabbitmq
+    ports:
+      - "5672:5672"      # AMQP protocol
+      - "15672:15672"    # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: rabbitmq-diagnostics ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - screentoimageconverter-network
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+  # Azurite - Azure Storage Emulator (Blob Storage)
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: screentoimageconverter-azurite
+    ports:
+      - "10000:10000"    # Blob Storage
+      - "10001:10001"    # Queue Storage
+      - "10002:10002"    # Table Storage
+    environment:
+      AZURITE_ACCOUNTS: devstoreaccount1:dGVzdGtleQ==
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:10000/devstoreaccount1?comp=list" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - screentoimageconverter-network
+    volumes:
+      - azurite-data:/data
+    restart: unless-stopped
+
+  # ScreenToImageConverter Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: screentoimageconverter-worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+    ports:
+      - "8080:8080"      # Health check endpoint
+    environment:
+      # Logging
+      Logging__LogLevel__Default: "Information"
+      Logging__LogLevel__Microsoft: "Warning"
+
+      # RabbitMQ Configuration (for local development)
+      ASPNETCORE_ENVIRONMENT: "Development"
+      RabbitMq__HostName: "rabbitmq"
+      RabbitMq__Port: "5672"
+      RabbitMq__UserName: "guest"
+      RabbitMq__Password: "guest"
+      RabbitMq__ExchangeName: "screenshot-requests"
+      RabbitMq__QueueName: "screenshot-requests-queue"
+      RabbitMq__RoutingKey: "screenshot.request"
+      RabbitMq__CompletionEventExchange: "screenshot-completed"
+      RabbitMq__CompletionEventRoutingKey: "screenshot.completed"
+
+      # Blob Storage Configuration (Azurite emulator)
+      BlobStorage__UseManagedIdentity: "false"
+      BlobStorage__ConnectionString: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=dGVzdGtleQ==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      BlobStorage__ContainerName: "screenshots"
+      BlobStorage__SasUrlExpirationMinutes: "60"
+      BlobStorage__AutoCreateContainer: "true"
+
+      # Playwright Configuration
+      Playwright__BrowserType: "chromium"
+      Playwright__DefaultViewportWidth: "1920"
+      Playwright__DefaultViewportHeight: "1080"
+      Playwright__DefaultTimeoutMs: "30000"
+      Playwright__WaitUntilEvent: "networkidle"
+      Playwright__Headless: "true"
+      Playwright__DisableSandbox: "true"
+      Playwright__FullPage: "true"
+      Playwright__MaxRetryAttempts: "2"
+      Playwright__RetryDelayMs: "1000"
+
+      # Application Insights (optional - can be disabled for local testing)
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ""
+
+    networks:
+      - screentoimageconverter-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Mount volumes for debugging/logs if needed
+    volumes:
+      - ./logs:/app/logs
+
+networks:
+  screentoimageconverter-network:
+    driver: bridge
+
+volumes:
+  rabbitmq-data:
+  azurite-data:
+  logs:
